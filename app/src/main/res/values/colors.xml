@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- RU Brand -->
+    <color name="ru_bg">#FEF9E6</color>
+    <color name="ru_crimson">#C41E3A</color>
+    <color name="ru_crimson_light">#F5E6E9</color>
+    <color name="ru_dark">#1A1530</color>
+    <color name="ru_teal">#0D9E76</color>
+    <color name="ru_amber">#8B6200</color>
+    <color name="ru_blue">#3B65DC</color>
+
+    <!-- Text -->
+    <color name="text_primary">#1A1530</color>
+    <color name="text_secondary">#888888</color>
+    <color name="text_hint">#AAAAAA</color>
+
+    <!-- Surface -->
+    <color name="background">@color/ru_bg</color>
+    <color name="surface">#FFFFFFD9</color>
+    <color name="surface_solid">#FFFFFF</color>
+    <color name="divider">#0D000000</color>
+
+    <!-- Category colors -->
+    <color name="cat_work">#3B65DC</color>
+    <color name="cat_identity">#C41E3A</color>
+    <color name="cat_education">#8B6200</color>
+    <color name="cat_personal">#0D9E76</color>
+    <color name="cat_media">#7C3AED</color>
+    <color name="cat_general">#888888</color>
+
+    <!-- Extension badge backgrounds -->
+    <color name="ext_pdf">#DC3545</color>
+    <color name="ext_doc">#2B579A</color>
+    <color name="ext_xls">#217346</color>
+    <color name="ext_ppt">#D24726</color>
+    <color name="ext_img">#0D9E76</color>
+    <color name="ext_audio">#7C3AED</color>
+    <color name="ext_video">#E67E22</color>
+    <color name="ext_code">#1A1530</color>
+    <color name="ext_zip">#888888</color>
+    <color name="ext_default">#C41E3A</color>
+
+    <!-- Legacy Material (keep for compatibility) -->
+    <color name="accent">@color/ru_crimson</color>
+    <color name="badge_bg">@color/ru_crimson_light</color>
+    <color name="badge_text">@color/ru_crimson</color>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+</resources>
