@@ -99,6 +99,114 @@ fun getTypeLabel(ext: String): String = when (ext.lowercase()) {
 }
 
 // ─────────────────────────────────────────────
+// Filename entity recognition
+// ─────────────────────────────────────────────
+
+data class FilenameEntities(
+    val year: String?,
+    val month: String?,
+    val quarter: String?,
+    val documentNumber: String?,
+    val personName: String?,
+    val version: String?
+)
+
+fun extractFilenameEntities(nameWithoutExt: String): FilenameEntities {
+    val lower = nameWithoutExt.lowercase()
+    return FilenameEntities(
+        year           = Regex("20(2[0-9])").find(lower)?.value,
+        month          = Regex("(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)").find(lower)?.value,
+        quarter        = Regex("q[1-4]").find(lower)?.value?.uppercase(),
+        documentNumber = Regex("#?\\b(\\d{3,6})\\b").find(lower)?.value,
+        personName     = when {
+            lower.startsWith("resume_") || lower.startsWith("cv_") ->
+                nameWithoutExt.substringAfter("_").substringBefore("_")
+                    .replaceFirstChar { it.uppercase() }
+            else -> null
+        },
+        version = Regex("\\b(v\\d+|final|draft|old|backup|copy)\\b").find(lower)?.value
+    )
+}
+
+fun entitiesToSentencePart(entities: FilenameEntities): String {
+    val parts = mutableListOf<String>()
+    entities.personName?.let { parts.add(it) }
+    if (entities.month != null && entities.year != null) {
+        parts.add("${entities.month} ${entities.year}")
+    } else {
+        entities.month?.let { parts.add(it) }
+        entities.year?.let { parts.add(it) }
+    }
+    entities.quarter?.let { parts.add(it) }
+    entities.documentNumber?.let { parts.add("number $it") }
+    entities.version?.let { parts.add("$it version") }
+    return parts.joinToString(" ")
+}
+
+// ─────────────────────────────────────────────
+// Natural language sentence builders
+// ─────────────────────────────────────────────
+
+private val MEDIA_EXTENSIONS = setOf(
+    "jpg", "jpeg", "png", "gif", "webp", "heic",
+    "mp3", "aac", "flac", "wav", "m4a", "mp4", "mkv", "avi", "mov"
+)
+
+private fun articleFor(label: String): String =
+    if (label.firstOrNull()?.let { it in "aeiou" } == true) "An" else "A"
+
+fun buildDocumentSentence(
+    file: File,
+    contentSnippet: String?,
+    categories: List<Category>,
+    ageBucket: String,
+    entities: FilenameEntities,
+    displayName: String? = null
+): String {
+    val cleanName = displayName ?: file.nameWithoutExtension
+        .replace(Regex("[_\\-.]"), " ")
+        .trim()
+    val catLabel  = categories.firstOrNull()?.label ?: "general"
+    val typeLabel = getTypeLabel(file.extension.lowercase())
+    val folder    = file.parentFile?.name ?: "storage"
+    val agePart   = ageBucket.replace("-", " ")
+    val entityPart = entitiesToSentencePart(entities)
+    val langPart   = MultilingualBridge.detectDominantLanguage(cleanName)?.let { " in $it" } ?: ""
+
+    val base = "${articleFor(catLabel)} $catLabel $typeLabel named $cleanName$langPart"
+    val entity = if (entityPart.isNotBlank()) " $entityPart" else ""
+    val content = if (!contentSnippet.isNullOrBlank()) " containing $contentSnippet" else ""
+    val time   = " last modified $agePart"
+    val loc    = " stored in $folder"
+
+    return "$base$entity$content$time$loc".take(400)
+}
+
+fun buildMediaSentence(
+    file: File,
+    contentSnippet: String?,
+    categories: List<Category>,
+    ageBucket: String,
+    entities: FilenameEntities
+): String {
+    val cleanName = file.nameWithoutExtension
+        .replace(Regex("[_\\-.]"), " ")
+        .trim()
+    val typeLabel = getTypeLabel(file.extension.lowercase())
+    val folder    = file.parentFile?.name ?: "storage"
+    val agePart   = ageBucket.replace("-", " ")
+    val catLabel  = categories.firstOrNull()?.label ?: "personal"
+    val entityPart = entitiesToSentencePart(entities)
+
+    val base    = "${articleFor(catLabel)} $catLabel $typeLabel file named $cleanName"
+    val entity  = if (entityPart.isNotBlank()) " $entityPart" else ""
+    val details = if (!contentSnippet.isNullOrBlank()) " $contentSnippet" else ""
+    val loc     = " in $folder folder modified $agePart"
+
+    return "$base$entity$details$loc".take(400)
+}
+
+// ─────────────────────────────────────────────
 // Filename pattern signals
 // ─────────────────────────────────────────────
 
@@ -192,7 +300,9 @@ data class FileMetadata(
     val contentSnippet: String?,
     val ageBucket: String,
     val sizeBucket: String,
-    val typeLabel: String
+    val typeLabel: String,
+    val ownerEntities: List<NameEntity> = emptyList(),
+    val ownerConfidence: Float = 0f
 )
 
 // ─────────────────────────────────────────────
@@ -201,15 +311,11 @@ data class FileMetadata(
 
 fun buildFileMetadata(file: File): FileMetadata {
     val ext        = file.extension.lowercase()
-    val nameClean  = file.nameWithoutExtension
-        .replace(Regex("[_\\-.]"), " ").trim()
     val typeLabel  = getTypeLabel(ext)
     val sizeBucket = getSizeBucket(file.length())
     val ageBucket  = getAgeBucket(file.lastModified())
-    val folder     = file.parentFile?.name ?: ""
-    val signals    = extractFilenameSignals(file.nameWithoutExtension)
+    val entities   = extractFilenameEntities(file.nameWithoutExtension)
 
-    // Extract content using ContentExtractor
     val contentSnip = try {
         extractContent(file)
     } catch (e: Exception) {
@@ -218,29 +324,35 @@ fun buildFileMetadata(file: File): FileMetadata {
     }
 
     val categories = classifyCategories(file, contentSnip)
-    val catLabels  = categories.joinToString(" ") { it.label }
 
-    // Build metadata string
-    val parts = mutableListOf<String>()
-    parts.add(nameClean)
-    parts.add(typeLabel)
-    parts.add(catLabels)
-    parts.add(sizeBucket)
-    parts.add(ageBucket)
-    parts.add(folder)
-    if (signals.isNotEmpty()) parts.add(signals.joinToString(" "))
-    if (!contentSnip.isNullOrBlank()) parts.add(contentSnip)
+    val pdfTitle = if (ext == "pdf") {
+        extractPdfMetadata(file)["title"]?.takeIf { it.isNotBlank() }
+    } else null
 
-    val metadataString = parts.filter { it.isNotBlank() }.joinToString(" | ")
+    val pdfMeta = if (ext == "pdf") extractPdfMetadata(file) else emptyMap()
+    val rawTextForNames = extractRawTextForOwnerNames(file)
+    val ownerEntities = extractOwnerNames(file, rawTextForNames, pdfMeta)
+    val ownerConfidence = OwnerMatcher.primaryConfidence(ownerEntities)
+
+    val metadataString = (if (ext in MEDIA_EXTENSIONS) {
+        buildMediaSentence(file, contentSnip, categories, ageBucket, entities)
+    } else {
+        buildDocumentSentence(file, contentSnip, categories, ageBucket, entities, pdfTitle)
+    }).let { base ->
+        val ownerPart = OwnerMatcher.primaryTokensForFts(ownerEntities)
+        if (ownerPart.isNotBlank()) "$base belonging to $ownerPart".take(400) else base
+    }
 
     Log.d(TAG, "${file.name} → $metadataString")
 
     return FileMetadata(
-        metadataString = metadataString,
-        categories     = categories,
-        contentSnippet = contentSnip,
-        ageBucket      = ageBucket,
-        sizeBucket     = sizeBucket,
-        typeLabel      = typeLabel
+        metadataString  = metadataString,
+        categories      = categories,
+        contentSnippet  = contentSnip,
+        ageBucket       = ageBucket,
+        sizeBucket      = sizeBucket,
+        typeLabel       = typeLabel,
+        ownerEntities   = ownerEntities,
+        ownerConfidence = ownerConfidence
     )
 }

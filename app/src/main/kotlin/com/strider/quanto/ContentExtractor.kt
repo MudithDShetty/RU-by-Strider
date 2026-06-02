@@ -2,13 +2,11 @@ package com.strider.quanto
 
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
 import java.io.File
-import java.io.InputStream
 import java.util.zip.ZipFile
 
 private const val TAG = "ContentExtractor"
@@ -27,6 +25,51 @@ private val STOPWORDS = setOf(
     "also", "just", "more", "some", "such", "only", "other", "than", "when",
     "there", "their", "they", "what", "which", "who", "how", "all", "each"
 )
+
+// ─────────────────────────────────────────────
+// Text signal extraction (5A)
+// ─────────────────────────────────────────────
+
+data class TextSignals(
+    val hasAmounts: Boolean,
+    val hasDates: List<String>,
+    val hasPhoneNumbers: Boolean,
+    val hasEmailAddresses: Boolean,
+    val dominantLanguage: String,
+    val keyNumbers: List<String>,
+    val firstHeading: String?,
+    val wordCount: Int
+)
+
+fun extractTextSignals(text: String): TextSignals {
+    val lower = text.lowercase()
+    return TextSignals(
+        hasAmounts        = Regex("(rs\\.?|₹|\\$|inr)\\s*[\\d,]+").containsMatchIn(lower),
+        hasDates          = Regex("\\b(\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2})\\b")
+                                .findAll(text).map { it.value }.take(3).toList(),
+        hasPhoneNumbers   = Regex("\\b[6-9]\\d{9}\\b").containsMatchIn(text),
+        hasEmailAddresses = Regex("[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}").containsMatchIn(text),
+        dominantLanguage  = MultilingualBridge.detectDominantLanguage(text) ?: "english",
+        keyNumbers        = Regex("\\b[A-Z]{5}[0-9]{4}[A-Z]\\b").findAll(text).map { it.value }.toList(),
+        firstHeading      = text.lines().firstOrNull { it.trim().length in 4..60 && !it.contains(".") }?.trim(),
+        wordCount         = text.split(Regex("\\s+")).size
+    )
+}
+
+fun signalsToString(signals: TextSignals): String {
+    val parts = mutableListOf<String>()
+    if (signals.hasAmounts)         parts.add("financial amounts")
+    if (signals.hasPhoneNumbers)    parts.add("phone number")
+    if (signals.hasEmailAddresses)  parts.add("email address")
+    when (signals.dominantLanguage) {
+        "hindi", "mixed" -> parts.add("${signals.dominantLanguage} language")
+        "tamil", "telugu", "bengali", "gujarati", "kannada", "malayalam", "punjabi", "arabic", "cjk" ->
+            parts.add("${signals.dominantLanguage} language")
+    }
+    signals.hasDates.firstOrNull()?.let { parts.add("dated $it") }
+    signals.firstHeading?.let { parts.add(it.lowercase()) }
+    return parts.joinToString(" ")
+}
 
 // ─────────────────────────────────────────────
 // Keyword cleaner shared util
@@ -52,7 +95,10 @@ fun extractTextContent(file: File): String? {
         val raw = file.bufferedReader(Charsets.UTF_8).use {
             it.readText().take(MAX_CHARS)
         }
-        cleanToKeywords(raw)
+        val keywords = cleanToKeywords(raw)
+        val signals  = signalsToString(extractTextSignals(raw))
+        listOf(keywords, signals).filter { it.isNotBlank() }.joinToString(" ").take(MAX_CHARS)
+            .ifBlank { null }
     } catch (e: Exception) {
         Log.w(TAG, "Text read failed ${file.name}: ${e.message}")
         null
@@ -60,8 +106,26 @@ fun extractTextContent(file: File): String? {
 }
 
 // ─────────────────────────────────────────────
-// PDF extractor (PdfBox-Android)
+// PDF extractor + metadata (5C)
 // ─────────────────────────────────────────────
+
+fun extractPdfMetadata(file: File): Map<String, String> {
+    return try {
+        PDDocument.load(file).use { doc ->
+            val info = doc.documentInformation
+            mapOf(
+                "title"    to (info.title    ?: ""),
+                "author"   to (info.author   ?: ""),
+                "subject"  to (info.subject  ?: ""),
+                "keywords" to (info.keywords ?: ""),
+                "creator"  to (info.creator  ?: ""),
+                "pages"    to doc.numberOfPages.toString()
+            ).filter { it.value.isNotBlank() }
+        }
+    } catch (e: Exception) {
+        emptyMap()
+    }
+}
 
 fun extractPdfContent(file: File): String? {
     if (file.length() == 0L) return null
@@ -70,10 +134,17 @@ fun extractPdfContent(file: File): String? {
             if (doc.isEncrypted) return null
             val stripper = PDFTextStripper().apply {
                 startPage = 1
-                endPage   = minOf(3, doc.numberOfPages) // first 3 pages only
+                endPage   = minOf(3, doc.numberOfPages)
             }
             val text = stripper.getText(doc).take(MAX_CHARS)
-            cleanToKeywords(text)
+            val meta = extractPdfMetadata(file)
+            val metaParts = listOfNotNull(
+                meta["title"]?.let { "title $it" },
+                meta["author"]?.let { "author $it" },
+                meta["keywords"]
+            )
+            val combined = (cleanToKeywords(text) + " " + metaParts.joinToString(" ")).trim()
+            combined.ifBlank { null }
         }
     } catch (e: Exception) {
         Log.w(TAG, "PDF extract failed ${file.name}: ${e.message}")
@@ -82,7 +153,7 @@ fun extractPdfContent(file: File): String? {
 }
 
 // ─────────────────────────────────────────────
-// DOCX extractor (ZIP + XML, no extra library)
+// DOCX extractor
 // ─────────────────────────────────────────────
 
 fun extractDocxContent(file: File): String? {
@@ -91,7 +162,6 @@ fun extractDocxContent(file: File): String? {
         ZipFile(file).use { zip ->
             val entry = zip.getEntry("word/document.xml") ?: return null
             val xml = zip.getInputStream(entry).bufferedReader().readText()
-            // Strip XML tags, keep text
             val text = xml
                 .replace(Regex("<[^>]+>"), " ")
                 .replace(Regex("\\s+"), " ")
@@ -105,14 +175,13 @@ fun extractDocxContent(file: File): String? {
 }
 
 // ─────────────────────────────────────────────
-// XLSX extractor (ZIP + XML, no extra library)
+// XLSX extractor
 // ─────────────────────────────────────────────
 
 fun extractXlsxContent(file: File): String? {
     if (file.length() == 0L) return null
     return try {
         ZipFile(file).use { zip ->
-            // Extract shared strings (actual cell text in xlsx)
             val ssEntry = zip.getEntry("xl/sharedStrings.xml") ?: return null
             val xml = zip.getInputStream(ssEntry).bufferedReader().readText()
             val text = xml
@@ -128,18 +197,44 @@ fun extractXlsxContent(file: File): String? {
 }
 
 // ─────────────────────────────────────────────
-// PPTX extractor (ZIP + XML, no extra library)
+// PPTX extractor + slide titles (5E)
 // ─────────────────────────────────────────────
+
+fun extractPptxTitles(file: File): List<String> {
+    return try {
+        ZipFile(file).use { zip ->
+            zip.entries().toList()
+                .filter { it.name.startsWith("ppt/slides/slide") && it.name.endsWith(".xml") }
+                .take(10)
+                .mapNotNull { entry ->
+                    val xml = zip.getInputStream(entry).bufferedReader().readText()
+                    val titleMatch = Regex(
+                        "<p:sp>.*?<p:ph type=\"title\".*?</p:sp>",
+                        RegexOption.DOT_MATCHES_ALL
+                    ).find(xml)
+                    titleMatch?.value
+                        ?.replace(Regex("<[^>]+>"), " ")
+                        ?.replace(Regex("\\s+"), " ")
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
+                }
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+}
 
 fun extractPptxContent(file: File): String? {
     if (file.length() == 0L) return null
     return try {
         ZipFile(file).use { zip ->
             val sb = StringBuilder()
-            // pptx slides are at ppt/slides/slide1.xml, slide2.xml etc
+            val titles = extractPptxTitles(file)
+            sb.append(titles.joinToString(" ")).append(" ")
+
             val entries = zip.entries().toList()
                 .filter { it.name.startsWith("ppt/slides/slide") && it.name.endsWith(".xml") }
-                .take(5) // first 5 slides
+                .take(5)
 
             for (entry in entries) {
                 val xml = zip.getInputStream(entry).bufferedReader().readText()
@@ -156,14 +251,17 @@ fun extractPptxContent(file: File): String? {
 }
 
 // ─────────────────────────────────────────────
-// EXIF extractor for images
+// EXIF extractor for images (5B enhanced)
 // ─────────────────────────────────────────────
 
 data class ExifData(
     val dateTaken: String?,
     val location: String?,
     val make: String?,
-    val model: String?
+    val model: String?,
+    val isPortrait: Boolean,
+    val isWhatsApp: Boolean,
+    val aspectLabel: String?
 )
 
 fun extractExifData(file: File): ExifData? {
@@ -172,16 +270,29 @@ fun extractExifData(file: File): ExifData? {
 
         val dateTaken = exif.getAttribute(ExifInterface.TAG_DATETIME)
             ?.replace(":", "-")
-            ?.take(10) // "2025-12-15"
+            ?.take(10)
 
         val lat = exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE)
         val lon = exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE)
         val location = if (lat != null && lon != null) "geotagged" else null
 
-        val make  = exif.getAttribute(ExifInterface.TAG_MAKE)
-        val model = exif.getAttribute(ExifInterface.TAG_MODEL)
+        val make     = exif.getAttribute(ExifInterface.TAG_MAKE)
+        val model    = exif.getAttribute(ExifInterface.TAG_MODEL)
+        val software = exif.getAttribute(ExifInterface.TAG_SOFTWARE)
+        val width    = exif.getAttribute(ExifInterface.TAG_IMAGE_WIDTH)
+        val height   = exif.getAttribute(ExifInterface.TAG_IMAGE_LENGTH)
 
-        ExifData(dateTaken, location, make, model)
+        val w = width?.toIntOrNull() ?: 0
+        val h = height?.toIntOrNull() ?: 0
+        val isPortrait = w > 0 && h > 0 && w < h
+        val isWhatsApp = software?.lowercase()?.contains("whatsapp") == true
+        val aspectLabel = when {
+            isPortrait -> "portrait photo"
+            w > 0 && h > 0 && w > h -> "landscape photo"
+            else -> null
+        }
+
+        ExifData(dateTaken, location, make, model, isPortrait, isWhatsApp, aspectLabel)
     } catch (e: Exception) {
         Log.w(TAG, "EXIF failed ${file.name}: ${e.message}")
         null
@@ -190,15 +301,17 @@ fun extractExifData(file: File): ExifData? {
 
 fun exifToString(exif: ExifData): String {
     val parts = mutableListOf<String>()
-    exif.dateTaken?.let { parts.add("taken:$it") }
+    exif.dateTaken?.let { parts.add("taken $it") }
     exif.location?.let { parts.add(it) }
+    if (exif.isWhatsApp) parts.add("whatsapp image")
+    exif.aspectLabel?.let { parts.add(it) }
     exif.make?.let     { parts.add(it.lowercase()) }
     exif.model?.let    { parts.add(it.lowercase()) }
     return parts.joinToString(" ")
 }
 
 // ─────────────────────────────────────────────
-// ID3 audio tag extractor
+// ID3 audio tag extractor + header signals (5F)
 // ─────────────────────────────────────────────
 
 data class AudioTagData(
@@ -208,6 +321,24 @@ data class AudioTagData(
     val genre: String?,
     val year: String?
 )
+
+fun extractAudioHeader(file: File): Map<String, String> {
+    return try {
+        val audioFile = AudioFileIO.read(file)
+        val header = audioFile.audioHeader
+        mapOf(
+            "duration" to when {
+                header.trackLength < 60  -> "short clip"
+                header.trackLength < 300 -> "short song"
+                header.trackLength < 600 -> "song"
+                else                     -> "long audio"
+            },
+            "bitrate" to if (header.bitRateAsNumber > 256) "high quality" else "standard"
+        )
+    } catch (e: Exception) {
+        emptyMap()
+    }
+}
 
 fun extractAudioTags(file: File): AudioTagData? {
     return try {
@@ -226,13 +357,14 @@ fun extractAudioTags(file: File): AudioTagData? {
     }
 }
 
-fun audioTagsToString(tags: AudioTagData): String {
+fun audioTagsToString(tags: AudioTagData, header: Map<String, String> = emptyMap()): String {
     val parts = mutableListOf<String>()
-    tags.title?.let  { parts.add(it) }
-    tags.artist?.let { parts.add(it) }
-    tags.album?.let  { parts.add(it) }
     tags.genre?.let  { parts.add(it) }
+    tags.artist?.let { parts.add(it) }
+    tags.title?.let  { parts.add(it) }
+    tags.album?.let  { parts.add(it) }
     tags.year?.let   { parts.add(it) }
+    header["duration"]?.let { parts.add(it) }
     return parts.joinToString(" ").lowercase()
 }
 
@@ -246,7 +378,6 @@ fun extractContent(file: File): String? {
         "csv"             -> extractTextContent(file)
         "json"            -> extractTextContent(file)
         "html", "htm"     -> extractTextContent(file)?.let {
-            // Strip any remaining HTML tags
             it.replace(Regex("<[^>]+>"), " ")
         }
         "py", "js", "ts",
@@ -265,9 +396,40 @@ fun extractContent(file: File): String? {
         "mp3", "aac",
         "flac", "m4a",
         "wav"             -> {
-            val tags = extractAudioTags(file)
-            if (tags != null) audioTagsToString(tags) else null
+            val tags   = extractAudioTags(file)
+            val header = extractAudioHeader(file)
+            if (tags != null) audioTagsToString(tags, header) else null
         }
         else              -> null
+    }
+}
+
+/** Raw text for owner-name label extraction (Name:, Father's Name:, etc.). */
+fun extractRawTextForOwnerNames(file: File): String? {
+    if (file.length() == 0L) return null
+    return try {
+        when (file.extension.lowercase()) {
+            "txt", "md", "csv", "json", "html", "htm",
+            "py", "js", "ts", "kt", "java", "cpp", "c", "h" ->
+                file.bufferedReader(Charsets.UTF_8).use { it.readText().take(MAX_CHARS) }
+            "pdf" -> PDDocument.load(file).use { doc ->
+                if (doc.isEncrypted) return null
+                PDFTextStripper().apply {
+                    startPage = 1
+                    endPage = minOf(3, doc.numberOfPages)
+                }.getText(doc).take(MAX_CHARS)
+            }
+            "docx" -> ZipFile(file).use { zip ->
+                val entry = zip.getEntry("word/document.xml") ?: return null
+                zip.getInputStream(entry).bufferedReader().readText()
+                    .replace(Regex("<[^>]+>"), " ")
+                    .replace(Regex("\\s+"), " ")
+                    .take(MAX_CHARS)
+            }
+            else -> null
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "Raw text for owner names failed ${file.name}: ${e.message}")
+        null
     }
 }

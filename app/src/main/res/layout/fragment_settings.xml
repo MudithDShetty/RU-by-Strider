@@ -73,6 +73,9 @@
                 android:layout_marginBottom="20dp">
 
                 <include layout="@layout/item_settings_row"
+                    android:id="@+id/rowYourName"/>
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider" android:layout_marginStart="52dp"/>
+                <include layout="@layout/item_settings_row"
                     android:id="@+id/rowSemantic"/>
                 <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider" android:layout_marginStart="52dp"/>
                 <include layout="@layout/item_settings_row"

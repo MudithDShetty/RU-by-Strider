@@ -1,0 +1,397 @@
+# ╔══════════════════════════════════════════════════════════════╗
+# ║     CURSOR RULES — MOBILE APP & AI DEVELOPMENT               ║
+# ║     Scope: React Native / Flutter / Expo + AI/LLM Features   ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+# ─────────────────────────────────────────────────────────────────
+# 1. GENERAL PRINCIPLES
+# ─────────────────────────────────────────────────────────────────
+
+## Code Quality
+- Write clean, self-documenting code. Prefer readability over cleverness.
+- Follow the DRY (Don't Repeat Yourself) principle, but avoid premature abstraction.
+- Every function/component should do ONE thing well (Single Responsibility Principle).
+- Delete dead code immediately. Don't comment it out.
+- Avoid magic numbers and strings — use named constants or enums.
+
+## Naming Conventions
+- Components: PascalCase (e.g., `UserProfileCard`)
+- Functions/variables: camelCase (e.g., `fetchUserData`)
+- Constants: SCREAMING_SNAKE_CASE (e.g., `MAX_RETRY_COUNT`)
+- Files: kebab-case for utilities (e.g., `api-client.ts`), PascalCase for components
+- Custom hooks: prefix with `use` (e.g., `useAuthSession`)
+- AI-related utilities: prefix with `ai` (e.g., `aiGenerateSummary`)
+
+## TypeScript First
+- Always use TypeScript. Never use `any` — use `unknown` and narrow the type.
+- Define explicit return types on all public functions.
+- Use `interface` for objects you'll extend; use `type` for unions and intersections.
+- Use Zod or similar for runtime validation of all external/AI data.
+
+## Comments
+- Explain WHY, not WHAT. The code shows what; comments explain intent.
+- Add JSDoc on all exported functions and hooks.
+- Mark incomplete work with `// TODO:` and technical debt with `// FIXME:`.
+- For AI prompts embedded in code, add a comment block explaining the prompt's purpose.
+
+
+# ─────────────────────────────────────────────────────────────────
+# 2. MOBILE DEVELOPMENT (React Native / Expo)
+# ─────────────────────────────────────────────────────────────────
+
+## Project Structure
+```
+src/
+  app/               # Expo Router screens or navigation
+  components/        # Reusable UI components
+    common/          # Truly generic (Button, Input, Card)
+    features/        # Feature-scoped components
+  hooks/             # Custom React hooks
+  services/          # API calls, device services
+  store/             # State management (Zustand / Redux)
+  ai/                # All AI/LLM logic isolated here
+    prompts/         # Prompt templates
+    hooks/           # AI-specific hooks
+    utils/           # Token counting, context management
+  constants/         # App-wide constants
+  types/             # Shared TypeScript types
+  utils/             # Pure helper functions
+  assets/            # Images, fonts, icons
+```
+
+## Component Rules
+- Every component file exports ONE default component.
+- Co-locate component styles in the same file (StyleSheet.create).
+- Never hardcode colors or spacing — use your design token system.
+- All touchable elements MUST have `accessibilityLabel` and `accessibilityRole`.
+- Minimum touch target size: 44×44 points (Apple/Google HIG requirement).
+- Use `React.memo` on list-item components rendered in FlatList.
+
+## Performance
+- Use `FlatList` or `FlashList` for any list with more than 20 items. Never `ScrollView` + `map()` for long lists.
+- Always provide `keyExtractor` to FlatList — never rely on index as key for dynamic lists.
+- Avoid anonymous functions in JSX props that cause unnecessary re-renders.
+  ```tsx
+  // BAD
+  <Button onPress={() => handlePress(item.id)} />
+  // GOOD
+  const handleItemPress = useCallback(() => handlePress(item.id), [item.id]);
+  <Button onPress={handleItemPress} />
+  ```
+- Use `useMemo` for expensive computations, not as a default.
+- Lazy-load heavy screens using `React.lazy` or dynamic imports in Expo Router.
+- Avoid `useEffect` for derived state — compute it inline or with `useMemo`.
+
+## Navigation (Expo Router / React Navigation)
+- Use file-based routing with Expo Router whenever possible.
+- Typed navigation params are mandatory — define a `RootParamList`.
+- Deep link support must be considered from day one — define `linking` config early.
+- Screen components should be thin — delegate logic to hooks/services.
+
+## Platform Handling
+- Use `Platform.select()` or `Platform.OS` for platform-specific behavior.
+- Never write platform-specific logic inside component render — extract it.
+- Test on both iOS and Android before marking any feature complete.
+
+## Offline & Networking
+- Every network request must handle loading, success, and error states.
+- Implement optimistic updates for user-facing mutations.
+- Use react-query / TanStack Query for all server state — not `useEffect` + `useState`.
+- Cache responses aggressively. Define staleTime and cacheTime explicitly.
+- Show offline indicators when the device loses connectivity.
+
+## Storage
+- Use `expo-secure-store` for sensitive data (tokens, keys). Never AsyncStorage for secrets.
+- Encrypt any locally-persisted sensitive user data.
+- Namespace all AsyncStorage / MMKV keys: `@appname/feature/key`.
+
+
+# ─────────────────────────────────────────────────────────────────
+# 3. AI / LLM INTEGRATION
+# ─────────────────────────────────────────────────────────────────
+
+## AI Architecture
+- Isolate ALL AI logic in `src/ai/`. No AI API calls scattered across components.
+- Create an AI service layer — components should never call LLM APIs directly.
+- Define a clear interface for AI responses — parse and validate before use.
+- Maintain a single AI client instance (singleton pattern) to manage keys/config.
+
+## API Keys & Security
+- NEVER hardcode API keys. Use environment variables via `expo-constants` or `.env`.
+- NEVER put API keys in client-side mobile code that ships to users.
+  → Route all AI calls through your own backend proxy.
+  → The backend holds the key; the client holds a session token.
+- Rotate API keys if they are ever exposed in git history.
+- Use `.gitignore` to exclude all `.env` files from version control.
+
+## Prompt Engineering
+- Store all prompt templates in `src/ai/prompts/` as named exports — not inline strings.
+- Version your system prompts (e.g., `SYSTEM_PROMPT_V2`).
+- Structure prompts with clear sections: context, instruction, constraints, output format.
+- Always define the expected output format in the prompt (JSON schema, etc.).
+- Validate AI output against the expected schema — never trust raw LLM output.
+  ```ts
+  // Example pattern
+  const ResponseSchema = z.object({
+    summary: z.string().max(500),
+    tags: z.array(z.string()).max(10),
+    confidence: z.number().min(0).max(1),
+  });
+  
+  const parsed = ResponseSchema.safeParse(rawAIResponse);
+  if (!parsed.success) handleAIParseError(parsed.error);
+  ```
+
+## Streaming & UX
+- Implement streaming responses for any AI output longer than a sentence.
+- Show a skeleton/typing indicator immediately when an AI request starts.
+- Allow users to cancel in-flight AI requests (AbortController).
+- Display partial streamed output as it arrives — don't wait for completion.
+- For voice/audio AI: show waveform animation during processing.
+
+## Context & Memory
+- Track token usage per request — log it in development.
+- Implement context window management: truncate or summarize old messages.
+- Never send personally identifiable information (PII) to third-party AI APIs without explicit user consent and disclosure in your privacy policy.
+- Strip or anonymize sensitive data before including it in prompts.
+- Implement conversation history in a dedicated store, not component state.
+
+## Error Handling for AI
+- Handle these error classes explicitly:
+  - Rate limit / quota exceeded (429) — implement exponential backoff with jitter.
+  - Context length exceeded — auto-truncate and retry.
+  - Content policy refusal — show a user-friendly message, log the prompt for review.
+  - Network timeout — retry with backoff, max 3 attempts.
+  - Malformed/unexpected response — fallback gracefully, never crash.
+- Never surface raw API error messages to end users.
+
+## AI Feature Flags
+- Gate AI features behind feature flags for gradual rollout.
+- Provide non-AI fallbacks for all AI-powered features where feasible.
+- Track AI feature usage metrics separately from core app metrics.
+
+## Model Selection
+- Default to the most capable model available within your cost/latency budget.
+- Document which model version is used for each feature — model behavior differs.
+- Prefer newer model versions in new features, but pin versions in production.
+  ```ts
+  // Constants file
+  export const AI_MODELS = {
+    CHAT: 'claude-sonnet-4-20250514',      // Balanced: quality + cost
+    FAST: 'claude-haiku-4-5-20251001',      // Low latency tasks
+    VISION: 'claude-sonnet-4-20250514',    // Image analysis
+  } as const;
+  ```
+
+
+# ─────────────────────────────────────────────────────────────────
+# 4. STATE MANAGEMENT
+# ─────────────────────────────────────────────────────────────────
+
+- Use Zustand for global client state (simple, low-boilerplate).
+- Use TanStack Query for ALL server/async state — no exceptions.
+- Component local state (`useState`) for UI-only state (modals, toggles).
+- Never store derived state — compute it from source of truth.
+- AI conversation state lives in a dedicated Zustand slice.
+  ```ts
+  // Slice pattern
+  interface AIConversationSlice {
+    messages: Message[];
+    isStreaming: boolean;
+    currentRequestId: string | null;
+    addMessage: (msg: Message) => void;
+    clearConversation: () => void;
+    cancelStream: () => void;
+  }
+  ```
+
+
+# ─────────────────────────────────────────────────────────────────
+# 5. SECURITY & PRIVACY
+# ─────────────────────────────────────────────────────────────────
+
+## Authentication
+- Implement biometric authentication (Face ID / Fingerprint) for sensitive actions.
+- Use short-lived access tokens + long-lived refresh tokens.
+- Store tokens in `expo-secure-store` only.
+- Implement automatic session expiry and re-authentication prompts.
+- Log out and clear all local data on token invalidation.
+
+## Data Handling
+- Collect the minimum data required (data minimization principle).
+- Never log user PII in production — scrub logs before shipping.
+- Implement certificate pinning for production API calls.
+- Validate and sanitize all user inputs before processing or sending.
+- Implement HTTPS-only. No HTTP endpoints, ever.
+
+## AI-Specific Privacy
+- Document all data sent to AI providers in your privacy policy.
+- Provide an in-app toggle to disable AI features (for privacy-conscious users).
+- Implement data retention policies — don't store AI conversations longer than necessary.
+- Never train or fine-tune models on user data without explicit opt-in consent.
+
+
+# ─────────────────────────────────────────────────────────────────
+# 6. ERROR HANDLING & RESILIENCE
+# ─────────────────────────────────────────────────────────────────
+
+- Use Error Boundaries around every major screen section.
+- Implement Sentry (or equivalent) for crash and error reporting from day one.
+- All async functions must be wrapped in try/catch — no unhandled promise rejections.
+- Define a global error handling utility:
+  ```ts
+  // utils/error-handler.ts
+  export function handleError(error: unknown, context: string): void {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    logger.error(`[${context}] ${message}`, { error });
+    // Report to Sentry in production
+    if (!__DEV__) Sentry.captureException(error, { extra: { context } });
+  }
+  ```
+- Show user-friendly error messages — never raw stack traces to users.
+- Implement retry logic for transient failures (network, AI service).
+
+
+# ─────────────────────────────────────────────────────────────────
+# 7. ACCESSIBILITY (A11Y)
+# ─────────────────────────────────────────────────────────────────
+
+- Target WCAG 2.1 AA compliance as the baseline.
+- All interactive elements need `accessibilityLabel`, `accessibilityHint`, `accessibilityRole`.
+- Support Dynamic Type / font scaling — test at largest and smallest sizes.
+- Color contrast ratio: minimum 4.5:1 for normal text, 3:1 for large text.
+- Never convey information through color alone — add icons or text labels.
+- Test with VoiceOver (iOS) and TalkBack (Android) before each release.
+- AI-generated content must include an "AI-generated" accessibility label where relevant.
+
+
+# ─────────────────────────────────────────────────────────────────
+# 8. TESTING
+# ─────────────────────────────────────────────────────────────────
+
+## Required Test Coverage
+- Unit tests for all utility functions and hooks (Jest).
+- Integration tests for all AI service functions — mock the LLM API.
+- Component tests for all common components (React Native Testing Library).
+- E2E tests for critical user flows: onboarding, core feature, AI interaction (Detox/Maestro).
+
+## AI Testing
+- Mock all LLM API calls in tests — never make real API calls in CI.
+- Test with a fixed set of AI response fixtures covering happy path, errors, and edge cases.
+- Test context management logic with boundary cases (empty, max length, truncation).
+- Validate that prompt injection attempts are handled gracefully.
+  ```ts
+  // Example AI mock
+  jest.mock('@/ai/client', () => ({
+    complete: jest.fn().mockResolvedValue(mockAIResponse),
+    stream: jest.fn().mockImplementation(mockStreamResponse),
+  }));
+  ```
+
+## Test Naming
+- Describe blocks use the component/function name.
+- Test names follow: "should [expected behavior] when [condition]"
+  ```ts
+  describe('useAIChat', () => {
+    it('should stream response tokens when message is sent', async () => { ... });
+    it('should handle rate limit error with exponential backoff', async () => { ... });
+    it('should clear conversation when clearConversation is called', () => { ... });
+  });
+  ```
+
+
+# ─────────────────────────────────────────────────────────────────
+# 9. PERFORMANCE BENCHMARKS
+# ─────────────────────────────────────────────────────────────────
+
+- App cold start < 2 seconds on a mid-range device.
+- Screen transitions < 300ms.
+- AI first-token response < 1 second (with streaming).
+- FlatList scroll: maintain 60 FPS (monitor with Flashlight or Perfetto).
+- Bundle size: monitor with `expo-bundle-analyzer`. Keep initial bundle < 5MB.
+- Use `React.Profiler` in development to catch unnecessary re-renders.
+- All images must be optimized: WebP format, appropriate resolution per screen density.
+
+
+# ─────────────────────────────────────────────────────────────────
+# 10. GIT & COLLABORATION
+# ─────────────────────────────────────────────────────────────────
+
+## Commit Messages (Conventional Commits)
+```
+<type>(<scope>): <short summary>
+
+Types: feat | fix | refactor | perf | test | docs | chore | style
+Scope: ai | auth | ui | navigation | storage | notifications
+
+Examples:
+feat(ai): add streaming support for chat responses
+fix(auth): resolve token refresh race condition
+perf(ui): memoize MessageList item to reduce re-renders
+```
+
+## Branch Strategy
+- `main` — production-ready, always deployable
+- `develop` — integration branch
+- `feature/description` — new features
+- `fix/description` — bug fixes
+- `ai/description` — AI feature work (separate to enable easy review)
+
+## PR Requirements
+- No PR without tests for new logic.
+- AI-related PRs must include a sample prompt and response in the PR description.
+- Security-sensitive PRs (auth, storage, AI keys) require 2 reviewers.
+- Never approve a PR with hardcoded credentials, even test ones.
+
+
+# ─────────────────────────────────────────────────────────────────
+# 11. AI ASSISTANT BEHAVIOR (how Cursor should help you)
+# ─────────────────────────────────────────────────────────────────
+
+When generating code, Cursor should:
+- Always generate TypeScript, never plain JavaScript.
+- Always add proper error handling to async operations.
+- Always add accessibility props to any new UI component.
+- Suggest Zod schemas for any data coming from an AI API.
+- Warn when it sees hardcoded strings that should be constants.
+- Warn when it sees API calls made directly from components.
+- Prefer functional components with hooks over class components.
+- Never use `any` — ask for more context if the type is unclear.
+- For AI features: always suggest the backend-proxy pattern for API keys.
+- Generate tests alongside implementation when asked to build a feature.
+- When adding a prompt, ask: "Is this prompt in `src/ai/prompts/`?"
+- Suggest `AbortController` whenever implementing an AI streaming feature.
+
+When reviewing code, Cursor should:
+- Flag any potential PII sent to third-party AI services.
+- Flag missing error handling in AI response processing.
+- Flag synchronous operations that could block the JS thread.
+- Flag `useEffect` used for derived state.
+- Flag missing loading/error states in data-fetching components.
+
+
+# ─────────────────────────────────────────────────────────────────
+# 12. ENVIRONMENT & BUILD
+# ─────────────────────────────────────────────────────────────────
+
+## Environment Variables
+```
+# .env.example (commit this, not .env)
+EXPO_PUBLIC_API_URL=https://api.yourapp.com
+EXPO_PUBLIC_AI_PROXY_URL=https://ai.yourapp.com/proxy
+# Never prefix AI provider keys with EXPO_PUBLIC_ — keep them server-side only
+```
+
+## Build Variants
+- `development` — verbose logging, mock AI responses available, debug menu
+- `staging` — production API, real AI calls, Sentry staging project
+- `production` — no logging of user data, no debug tooling
+
+## OTA Updates
+- Use Expo Updates for JS-only fixes.
+- Never ship a breaking native change as an OTA update.
+- AI prompt updates can ship via OTA — document the prompt version in update notes.
+
+# ─────────────────────────────────────────────────────────────────
+# END OF RULES
+# ─────────────────────────────────────────────────────────────────

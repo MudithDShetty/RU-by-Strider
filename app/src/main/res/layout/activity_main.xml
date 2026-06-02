@@ -13,6 +13,51 @@
         android:layout_height="match_parent"
         android:paddingBottom="60dp"/>
 
+    <!-- Non-blocking setup progress — user can browse while model loads -->
+    <LinearLayout
+        android:id="@+id/initBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:orientation="vertical"
+        android:background="@drawable/bg_init_banner"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:visibility="gone"
+        android:elevation="10dp">
+
+        <TextView
+            android:id="@+id/tvInitStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/status_first_load"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp"
+            android:fontFamily="sans-serif-medium"/>
+
+        <ProgressBar
+            android:id="@+id/initProgressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:layout_marginTop="8dp"
+            android:max="100"
+            android:progress="0"
+            android:progressTint="@color/ru_crimson"
+            android:progressBackgroundTint="#33AA0000"/>
+
+        <TextView
+            android:id="@+id/tvInitHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/init_banner_hint"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"/>
+    </LinearLayout>
+
     <!-- Bottom nav bar -->
     <LinearLayout
         android:id="@+id/llNavBar"
@@ -102,6 +147,189 @@
         </LinearLayout>
 
     </LinearLayout>
+
+    <!-- Name onboarding — full-screen in-app page (not a dialog) -->
+    <FrameLayout
+        android:id="@+id/onboardingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/ru_bg"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone"
+        android:elevation="14dp">
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:overScrollMode="never">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:paddingStart="28dp"
+                android:paddingEnd="28dp"
+                android:paddingTop="72dp"
+                android:paddingBottom="32dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="RU"
+                    android:textSize="56sp"
+                    android:fontFamily="serif"
+                    android:textStyle="bold"
+                    android:textColor="@color/ru_dark"
+                    android:letterSpacing="-0.05"/>
+
+                <TextView
+                    android:id="@+id/tvOnboardingTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="40dp"
+                    android:text="@string/onboarding_name_title"
+                    android:textSize="22sp"
+                    android:fontFamily="sans-serif-medium"
+                    android:textColor="@color/text_primary"
+                    android:gravity="center"/>
+
+                <TextView
+                    android:id="@+id/tvOnboardingSub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/onboarding_name_sub"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_secondary"
+                    android:lineSpacingExtra="3dp"
+                    android:gravity="center"/>
+
+                <EditText
+                    android:id="@+id/etOnboardingName"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="28dp"
+                    android:hint="@string/onboarding_name_hint"
+                    android:textColorHint="@color/text_hint"
+                    android:textSize="15sp"
+                    android:textColor="@color/text_primary"
+                    android:inputType="textPersonName|textCapWords"
+                    android:maxLines="2"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:background="@drawable/bg_search_bar"/>
+
+                <TextView
+                    android:id="@+id/btnOnboardingSave"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="20dp"
+                    android:gravity="center"
+                    android:text="@string/onboarding_name_save"
+                    android:textSize="15sp"
+                    android:textColor="@android:color/white"
+                    android:fontFamily="sans-serif-medium"
+                    android:background="@drawable/bg_btn_primary"
+                    android:clickable="true"
+                    android:focusable="true"/>
+
+                <TextView
+                    android:id="@+id/btnOnboardingSkip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/onboarding_name_skip"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_secondary"
+                    android:fontFamily="sans-serif-medium"
+                    android:padding="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="?attr/selectableItemBackgroundBorderless"/>
+
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
+
+    <!-- First-run setup overlay — only during one-time model copy; dismissible -->
+    <FrameLayout
+        android:id="@+id/loadingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#CCF5EDE8"
+        android:clickable="false"
+        android:focusable="false"
+        android:visibility="gone"
+        android:elevation="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingStart="28dp"
+            android:paddingEnd="28dp"
+            android:paddingTop="48dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RU"
+                android:textSize="40sp"
+                android:fontFamily="serif"
+                android:textStyle="bold"
+                android:textColor="@color/ru_dark"/>
+
+            <TextView
+                android:id="@+id/tvLoadingMessage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="@string/status_first_load"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"/>
+
+            <ProgressBar
+                android:id="@+id/setupProgressBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="8dp"
+                android:layout_marginTop="20dp"
+                android:max="100"
+                android:progress="0"
+                android:progressTint="@color/ru_crimson"
+                android:progressBackgroundTint="#33AA0000"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/status_first_load_sub"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:gravity="center"/>
+
+            <TextView
+                android:id="@+id/btnSetupContinue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="@string/init_continue_while_loading"
+                android:textSize="14sp"
+                android:textColor="@color/ru_crimson"
+                android:fontFamily="sans-serif-medium"
+                android:padding="12dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackgroundBorderless"/>
+        </LinearLayout>
+    </FrameLayout>
 
     <!-- Toast snackbar -->
     <LinearLayout

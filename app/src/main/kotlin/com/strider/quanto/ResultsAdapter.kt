@@ -13,6 +13,22 @@ class ResultsAdapter(
     private val onItemClick: (SearchResult) -> Unit
 ) : ListAdapter<SearchResult, ResultsAdapter.ViewHolder>(DIFF_CALLBACK) {
 
+    private var shareMode = false
+    private var selectedPath: String? = null
+
+    fun setShareMode(enabled: Boolean) {
+        if (shareMode == enabled) return
+        shareMode = enabled
+        if (!enabled) selectedPath = null
+        notifyDataSetChanged()
+    }
+
+    fun setShareSelection(path: String?) {
+        if (selectedPath == path) return
+        selectedPath = path
+        notifyDataSetChanged()
+    }
+
     inner class ViewHolder(val binding: ItemResultBinding) :
         RecyclerView.ViewHolder(binding.root)
 
@@ -33,16 +49,31 @@ class ResultsAdapter(
             tvFilePath.text = file.metadata.typeLabel + " · " +
                     (file.path.substringBeforeLast("/").substringAfterLast("/"))
             tvFileSize.text = file.displaySize + " · " + file.metadata.ageBucket
-            tvScore.text    = "${result.scorePercent}%"
+
+            tvScore.text = if (HYBRID_DEV_MODE) {
+                val branch = when {
+                    result.denseRank >= 0 && result.bm25Rank >= 0 -> "HYBRID"
+                    result.bm25Rank >= 0 -> "LEXICAL"
+                    result.denseRank >= 0 -> "GRANITE"
+                    else -> "?"
+                }
+                val catTag = if (result.categoryMatched) " ✓cat" else ""
+                "${result.scorePercent}% [$branch]$catTag"
+            } else {
+                "${result.scorePercent}%"
+            }
+
             tvExtension.text = file.extension.uppercase().take(4)
 
-            // Extension badge color
             val badgeColor = extColor(file.extension)
             (tvExtension.background as? GradientDrawable)?.setColor(badgeColor)
 
-            // Top result gets highlighted card
             root.setBackgroundResource(
-                if (position == 0) R.drawable.bg_file_card_top else R.drawable.bg_file_card
+                when {
+                    shareMode && file.path == selectedPath -> R.drawable.bg_file_card_selected
+                    !shareMode && position == 0 -> R.drawable.bg_file_card_top
+                    else -> R.drawable.bg_file_card
+                }
             )
 
             root.setOnClickListener { onItemClick(result) }
@@ -67,6 +98,9 @@ class ResultsAdapter(
     }
 
     companion object {
+        /** Set to false before release. Shows BM25/DENSE fusion debug badges. */
+        const val HYBRID_DEV_MODE = true
+
         private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<SearchResult>() {
             override fun areItemsTheSame(a: SearchResult, b: SearchResult) =
                 a.file.path == b.file.path
