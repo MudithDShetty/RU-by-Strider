@@ -4,6 +4,8 @@
 
 RU finds documents, photos, and media on your phone using natural language — in Hindi, English, Hinglish, and many other languages — without sending your files or queries to the cloud. All indexing, embedding, and ranking runs locally via ONNX Runtime and SQLite.
 
+**Documantation by:- Mudith D Shetty**
+
 | | |
 |---|---|
 | **Platform** | Android 8.0+ (API 26), target SDK 34 |
