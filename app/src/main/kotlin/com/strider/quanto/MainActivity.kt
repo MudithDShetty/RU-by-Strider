@@ -676,15 +676,37 @@ class MainActivity : AppCompatActivity() {
         performSearchWithFilter(null, semanticEnabled = isSemanticEnabled())
     }
 
+    /** Search always runs once the index subsystem is ready; this gates status messaging only. */
+    private fun isSearchWarmingUp(indexedCount: Int): Boolean =
+        isIndexing && indexedCount < MIN_FILES_SEARCH_UNLOCK
+
+    private fun statusForSearchResults(
+        results: List<SearchResult>,
+        rawQuery: String,
+        indexedCount: Int,
+        categoryHints: List<Category>
+    ): String {
+        if (results.isEmpty() && indexedCount == 0) {
+            return if (isIndexing) getString(R.string.search_indexing_scanning)
+            else getString(R.string.search_no_files_hint)
+        }
+        if (isSearchWarmingUp(indexedCount)) {
+            return getString(R.string.search_indexing_warming_up, indexedCount, MIN_FILES_SEARCH_UNLOCK)
+        }
+        val catInfo = if (categoryHints.isNotEmpty())
+            " [${categoryHints.joinToString { it.label }}]" else ""
+        return if (results.isEmpty()) getString(R.string.no_results, rawQuery)
+        else getString(R.string.results_count, results.size, rawQuery) + catInfo
+    }
+
     private fun performSearchWithFilter(
         categoryFilter: List<Category>?,
         semanticEnabled: Boolean = isSemanticEnabled()
     ) {
         val rawQuery = homeBinding.etSearch.text.toString().trim()
         if (rawQuery.isEmpty()) return
-        if (!isIndexReady || indexer.size == 0) {
-            if (!isEngineReady) showToast(getString(R.string.status_loading))
-            else showToast(getString(R.string.index_files_first))
+        if (!isIndexReady || !::indexer.isInitialized) {
+            showToast(getString(R.string.status_loading))
             return
         }
         if (semanticEnabled && !isEngineReady) {
@@ -708,6 +730,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
+                val indexedCount = indexer.size
+
                 withContext(Dispatchers.Main) {
                     if (queryGeneration != searchGeneration) return@withContext
                     resultsAdapter.submitList(results)
@@ -717,16 +741,13 @@ class MainActivity : AppCompatActivity() {
                             showSharePicker(results, enriched.shareTarget)
                             showStatus(getString(R.string.share_picker_tap_hint))
                         } else {
-                            showStatus(getString(R.string.no_results, rawQuery))
-                            showToast(getString(R.string.share_no_file))
+                            showStatus(statusForSearchResults(results, rawQuery, indexedCount, enriched.categoryHints))
+                            if (!isSearchWarmingUp(indexedCount) && indexedCount > 0) {
+                                showToast(getString(R.string.share_no_file))
+                            }
                         }
                     } else {
-                        val catInfo = if (enriched.categoryHints.isNotEmpty())
-                            " [${enriched.categoryHints.joinToString { it.label }}]" else ""
-                        showStatus(
-                            if (results.isEmpty()) getString(R.string.no_results, rawQuery)
-                            else getString(R.string.results_count, results.size, rawQuery) + catInfo
-                        )
+                        showStatus(statusForSearchResults(results, rawQuery, indexedCount, enriched.categoryHints))
                     }
                 }
             } catch (e: CancellationException) {
@@ -831,8 +852,8 @@ class MainActivity : AppCompatActivity() {
             showToast(getString(R.string.voice_disabled))
             return
         }
-        if (!isIndexReady || indexer.size == 0) {
-            showToast(getString(R.string.index_files_first))
+        if (!isIndexReady || !::indexer.isInitialized) {
+            showToast(getString(R.string.status_loading))
             return
         }
         if (!isEngineReady) {
@@ -987,6 +1008,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        /** First-index UX: show warming-up status until this many files are in SQLite. Search is never blocked. */
+        private const val MIN_FILES_SEARCH_UNLOCK = 10
+
         private const val PREFS_NAME = "strider_quanto_prefs"
         private const val PREF_VOICE_SEARCH_ENABLED = "voice_search_enabled"
         private const val PREF_SEMANTIC_RERANK = "semantic_rerank_enabled"

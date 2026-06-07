@@ -8,7 +8,9 @@ import android.os.Build
 import android.os.Environment
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.ForegroundInfo
+import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
@@ -20,7 +22,7 @@ class IndexingWorker(
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
-    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+    override suspend fun doWork(): ListenableWorker.Result = withContext(Dispatchers.IO) {
         val app = applicationContext as StriderApp
 
         // Model load can take several minutes on first install or after Android kills the process.
@@ -44,7 +46,7 @@ class IndexingWorker(
                         KEY_PHASE to PHASE_WAITING_MODEL
                     )
                 )
-                return@withContext Result.retry()
+                return@withContext ListenableWorker.Result.retry()
             }
         }
 
@@ -94,7 +96,7 @@ class IndexingWorker(
                     KEY_DONE to true
                 )
             )
-            Result.success(
+            ListenableWorker.Result.success(
                 workDataOf(
                     KEY_COUNT to app.indexer.size,
                     KEY_STATUS to "✓ Index complete",
@@ -108,7 +110,9 @@ class IndexingWorker(
                     KEY_PHASE to PHASE_FAILED
                 )
             )
-            Result.failure(workDataOf(KEY_STATUS to (e.message ?: "Unknown error")))
+            ListenableWorker.Result.failure(
+                workDataOf(KEY_STATUS to (e.message ?: "Unknown error"))
+            )
         }
     }
 
@@ -176,6 +180,6 @@ class IndexingWorker(
         private const val WAIT_POLL_MS = 1000L
         private const val NOTIFICATION_ID = 1001
 
-        fun inputData(forceFull: Boolean) = workDataOf(KEY_FORCE_FULL to forceFull)
+        fun inputData(forceFull: Boolean): Data = workDataOf(KEY_FORCE_FULL to forceFull)
     }
 }

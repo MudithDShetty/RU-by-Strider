@@ -19,7 +19,9 @@
     <string name="init_model_loading_bg">Loading AI model in background…</string>
     <string name="status_ready">Model ready ✓  Tap Index Files to begin</string>
     <string name="files_indexed">%d files indexed</string>
-    <string name="index_files_first">Index files first</string>
+    <string name="search_indexing_scanning">Scanning storage… search will improve as files are indexed</string>
+    <string name="search_indexing_warming_up">Indexing… %1$d of %2$d files ready · results improve as indexing continues</string>
+    <string name="search_no_files_hint">No files indexed yet — open Index to scan your device</string>
     <string name="permission_denied">Storage permission denied</string>
     <string name="listening">Listening…</string>
     <string name="tap_to_cancel">tap to cancel</string>

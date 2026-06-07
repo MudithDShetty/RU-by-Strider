@@ -15,8 +15,8 @@ class EmbeddingEngine(private val context: Context) {
         const val EMBEDDING_DIM = 384
         /** Full sequence length for search queries (may be longer sentences). */
         const val FIXED_SEQ_LEN = 128
-        /** Shorter length for filename/metadata indexing — ~60% faster inference. */
-        const val MAX_SEQ_LEN_SHORT = 64
+        /** Shorter length for filename/metadata indexing — content-first descriptions need more tokens. */
+        const val MAX_SEQ_LEN_SHORT = 96
         const val PAD_TOKEN_ID = 179935L  // <|endoftext|>
         const val MODEL_ASSET = "embedding_model.onnx"
         /** Disabled — recreating the session causes heat and multi-second stalls. */
@@ -121,6 +121,8 @@ class EmbeddingEngine(private val context: Context) {
         if (texts.isEmpty()) return emptyList()
         check(isReady) { "Call initialize() before embed()" }
 
+        val sanitized = texts.map { it.trim().ifBlank { "[empty]" } }
+
         if (countTowardRefresh) {
             if (searchEmbedCount > 0 && searchEmbedCount % SESSION_REFRESH_EVERY == 0) {
                 refreshSession()
@@ -128,8 +130,8 @@ class EmbeddingEngine(private val context: Context) {
             searchEmbedCount += texts.size
         }
 
-        val batchSize = texts.size
-        val encoded = texts.map { tokenizer.encode(it.take(1000), maxSeqLen) }
+        val batchSize = sanitized.size
+        val encoded = sanitized.map { tokenizer.encode(it.take(1000), maxSeqLen) }
         val seqLen = encoded.maxOf { it.inputIds.size }.coerceAtMost(maxSeqLen)
 
         val paddedIds  = LongArray(batchSize * seqLen) { PAD_TOKEN_ID }
@@ -223,10 +225,12 @@ class EmbeddingEngine(private val context: Context) {
         Log.d(TAG, "ONNX session refreshed")
     }
 
+    /** Dot product — only valid when both vectors are L2-normalized (as [embed] returns). */
     fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
+        require(a.size == b.size) { "Vector dimension mismatch" }
         var dot = 0f
         for (i in a.indices) dot += a[i] * b[i]
-        return dot
+        return dot.coerceIn(-1f, 1f)
     }
 
     private fun l2Normalize(vec: FloatArray): FloatArray {

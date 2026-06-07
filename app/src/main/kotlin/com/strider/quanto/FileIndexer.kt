@@ -59,7 +59,6 @@ class FileIndexer(
 
     companion object {
         private const val TAG = "FileIndexer"
-        private const val MAX_FILES = 5000
 
         private val SUPPORTED_EXTENSIONS_ORDERED = listOf(
             "txt", "md", "pdf", "doc", "docx",
@@ -94,46 +93,37 @@ class FileIndexer(
 
     private val searchLock = Any()
 
-    private val buckets = mapOf(
-        Category.IDENTITY  to mutableListOf<IndexedFileStub>(),
-        Category.WORK      to mutableListOf<IndexedFileStub>(),
-        Category.EDUCATION to mutableListOf<IndexedFileStub>(),
-        Category.PERSONAL  to mutableListOf<IndexedFileStub>(),
-        Category.MEDIA     to mutableListOf<IndexedFileStub>(),
-        Category.GENERAL   to mutableListOf<IndexedFileStub>()
-    )
+    /** Total indexed files — always read from SQLite, never held in RAM. */
+    val size: Int get() = db.getTotalCount()
 
-    val size: Int get() = buckets.values.sumOf { it.size }
+    fun getBucketSizes(): Map<Category, Int> = db.getCategoryCounts()
 
-    fun getBucketSizes(): Map<Category, Int> = buckets.mapValues { it.value.size }
-
-    private var deferredFtsFiles: List<File>? = null
+    private var deferredFtsPaths: List<String>? = null
 
     fun loadFromDatabase(deferFtsBackfill: Boolean = false) {
-        buckets.values.forEach { it.clear() }
-        val stubs = db.loadStubs()
-        for (stub in stubs) {
-            for (cat in stub.categories) {
-                buckets[cat]?.add(stub)
-            }
+        val count = db.getTotalCount()
+        if (deferFtsBackfill && count > 0) {
+            deferredFtsPaths = db.loadAllPaths()
+        } else if (count > 0) {
+            backfillFtsKeywords(db.loadAllPaths())
         }
-        if (deferFtsBackfill) {
-            deferredFtsFiles = stubs.map { File(it.path) }.filter { it.exists() }
-        } else {
-            backfillFtsKeywords(stubs.map { File(it.path) }.filter { it.exists() })
-        }
-        Log.d(TAG, "Loaded ${stubs.size} file stubs into memory")
-        Log.d(TAG, "Bucket sizes: ${getBucketSizes()}")
+        Log.d(TAG, "Index ready — $count files (disk-backed search)")
+        Log.d(TAG, "Category counts: ${getBucketSizes()}")
     }
 
     /** Runs FTS backfill deferred from startup so the UI is not blocked. */
     fun runDeferredFtsBackfill() {
-        val files = deferredFtsFiles ?: return
-        deferredFtsFiles = null
-        backfillFtsKeywords(files)
+        val paths = deferredFtsPaths ?: return
+        deferredFtsPaths = null
+        backfillFtsKeywords(paths)
     }
 
-    fun buildKeywordString(file: File, contentSnippet: String?, metadata: FileMetadata): String {
+    fun buildKeywordString(
+        file: File,
+        contentSnippet: String?,
+        metadata: FileMetadata,
+        pdfMeta: Map<String, String> = emptyMap()
+    ): String {
         val parts = mutableListOf<String>()
         val entities = extractFilenameEntities(file.nameWithoutExtension)
 
@@ -156,7 +146,11 @@ class FileIndexer(
         entities.documentNumber?.let { parts.add(it) }
         entities.version?.let { parts.add(it) }
 
-        if (file.extension.lowercase() == "pdf") {
+        if (file.extension.lowercase() == "pdf" && pdfMeta.isNotEmpty()) {
+            parts.addAll(pdfMeta.values)
+        } else if (file.extension.lowercase() == "pdf" && metadata.pdfMetadata.isNotEmpty()) {
+            parts.addAll(metadata.pdfMetadata.values)
+        } else if (file.extension.lowercase() == "pdf") {
             parts.addAll(extractPdfMetadata(file).values)
         }
 
@@ -191,21 +185,19 @@ class FileIndexer(
             .filter { it.extension.lowercase() in SUPPORTED_EXTENSIONS }
             .toList()
 
-        onProgress("Found ${allDiskFiles.size} supported files — preparing index…")
+        onProgress("Found ${allDiskFiles.size} supported files — indexing all…")
 
-        val diskFiles = allDiskFiles
-            .sortedWith(
-                compareBy<File>(
-                    { filePriority(it) },
-                    { file ->
-                        val idx = SUPPORTED_EXTENSIONS_ORDERED.indexOf(file.extension.lowercase())
-                        if (idx == -1) Int.MAX_VALUE else idx
-                    }
-                )
+        val diskFiles = allDiskFiles.sortedWith(
+            compareBy<File>(
+                { filePriority(it) },
+                { file ->
+                    val idx = SUPPORTED_EXTENSIONS_ORDERED.indexOf(file.extension.lowercase())
+                    if (idx == -1) Int.MAX_VALUE else idx
+                }
             )
-            .take(MAX_FILES)
+        )
 
-        Log.d(TAG, "Files on disk: ${allDiskFiles.size}, taking top ${diskFiles.size} by priority")
+        Log.d(TAG, "Files on disk: ${diskFiles.size} (no cap — all will be indexed)")
 
         val diskPaths = diskFiles.map { it.absolutePath }.toSet()
         val deletedPaths = storedMeta.keys.filter { it !in diskPaths }
@@ -229,17 +221,22 @@ class FileIndexer(
         var indexedCount = 0
         val skippedCount = diskFiles.size - toIndex.size
 
-        // Process in batches — one ONNX forward pass per batch (3-5× faster than sequential)
         toIndex.chunked(BATCH_SIZE).forEach { batch ->
             try {
-                onProgress("Indexing batch of ${batch.size}…")
+                onProgress("Indexing batch of ${batch.size}… (${db.getTotalCount()} total so far)")
 
                 val metadatas = batch.map { buildFileMetadata(it) }
-                val texts = metadatas.map { it.metadataString }
+                val pairs = batch.zip(metadatas).filter { (_, meta) ->
+                    meta.metadataString.isNotBlank().also { ok ->
+                        if (!ok) Log.w(TAG, "Skipping blank metadata")
+                    }
+                }
+                if (pairs.isEmpty()) return@forEach
+
+                val texts = pairs.map { it.second.metadataString }
                 val embeddings = engine.embedBatch(texts)
 
-                batch.forEachIndexed { i, file ->
-                    val metadata = metadatas[i]
+                pairs.forEachIndexed { i, (file, metadata) ->
                     val indexed = IndexedFile(
                         path         = file.absolutePath,
                         name         = file.name,
@@ -252,7 +249,9 @@ class FileIndexer(
                     )
 
                     db.upsertFile(indexed)
-                    val keywords = buildKeywordString(file, metadata.contentSnippet, metadata)
+                    val keywords = buildKeywordString(
+                        file, metadata.contentSnippet, metadata, metadata.pdfMetadata
+                    )
                     db.ftsInsert(file.absolutePath, keywords)
                     indexedCount++
                     onFileIndexed(indexedCount, skippedCount, deletedPaths.size)
@@ -266,6 +265,7 @@ class FileIndexer(
                     try {
                         onProgress("Indexing: ${file.name}")
                         val metadata  = buildFileMetadata(file)
+                        if (metadata.metadataString.isBlank()) continue
                         val embedding = engine.embed(metadata.metadataString)
 
                         val indexed = IndexedFile(
@@ -280,7 +280,9 @@ class FileIndexer(
                         )
 
                         db.upsertFile(indexed)
-                        val keywords = buildKeywordString(file, metadata.contentSnippet, metadata)
+                        val keywords = buildKeywordString(
+                            file, metadata.contentSnippet, metadata, metadata.pdfMetadata
+                        )
                         db.ftsInsert(file.absolutePath, keywords)
                         indexedCount++
                         onFileIndexed(indexedCount, skippedCount, deletedPaths.size)
@@ -292,22 +294,26 @@ class FileIndexer(
         }
 
         loadFromDatabase()
-        backfillFtsKeywords(diskFiles)
         Log.d(TAG, "Done — indexed:$indexedCount skipped:$skippedCount deleted:${deletedPaths.size} total:$size")
     }
 
-    /** Populate FTS for all on-disk files without re-embedding unchanged files. */
-    private fun backfillFtsKeywords(diskFiles: List<File>) {
-        val stubs = db.loadStubs().associateBy { it.path }
+    /** Populate FTS keywords in batches — paths only, no full stub load into memory. */
+    private fun backfillFtsKeywords(paths: List<String>) {
         var count = 0
-        for (file in diskFiles) {
-            val stub = stubs[file.absolutePath] ?: continue
-            try {
-                val keywords = buildKeywordString(file, stub.metadata.contentSnippet, stub.metadata)
-                db.ftsInsert(file.absolutePath, keywords)
-                count++
-            } catch (e: Exception) {
-                Log.w(TAG, "FTS backfill failed for ${file.name}: ${e.message}")
+        for (chunk in paths.chunked(100)) {
+            val stubs = db.loadStubsForPaths(chunk)
+            for (stub in stubs) {
+                val file = File(stub.path)
+                if (!file.exists()) continue
+                try {
+                    val keywords = buildKeywordString(
+                        file, stub.metadata.contentSnippet, stub.metadata, stub.metadata.pdfMetadata
+                    )
+                    db.ftsInsert(stub.path, keywords)
+                    count++
+                } catch (e: Exception) {
+                    Log.w(TAG, "FTS backfill failed for ${file.name}: ${e.message}")
+                }
             }
         }
         Log.d(TAG, "FTS keywords backfilled for $count files")
@@ -319,23 +325,16 @@ class FileIndexer(
         semanticEnabled: Boolean = true
     ): List<SearchResult> = synchronized(searchLock) {
         SearchPipeline.search(
-            stubs          = allStubs(),
-            enrichedQuery  = enrichedQuery,
-            engine         = engine,
-            loadEmbeddings = { paths -> db.loadEmbeddingsForPaths(paths) },
-            topK           = topK,
+            enrichedQuery   = enrichedQuery,
+            engine          = engine,
+            db              = db,
+            topK            = topK,
             semanticEnabled = semanticEnabled
         )
     }
 
-    private fun stubToFile(stub: IndexedFileStub): IndexedFile =
-        IndexedFile.fromStub(stub, FloatArray(EmbeddingEngine.EMBEDDING_DIM))
-
-    private fun allStubs(): List<IndexedFileStub> =
-        buckets.values.flatten().distinctBy { it.path }
-
     fun clear() {
-        buckets.values.forEach { it.clear() }
+        // DB cleared by caller; counts read live from SQLite.
     }
 
     private fun filePriority(file: File): Int {

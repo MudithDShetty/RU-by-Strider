@@ -71,19 +71,15 @@ object LexicalSearch {
             when {
                 nameNorm == token || nameRaw == "$token.${stub.extension}" -> score += 100f * weight
                 nameNorm.startsWith("$token ") || nameNorm.endsWith(" $token") -> score += 80f * weight
-                nameNorm.contains(" $token ") || nameNorm.contains(token) -> score += 50f * weight
+                QueryScoring.textContainsToken(nameNorm, token) -> score += 50f * weight
             }
             if (ext == token) score += 40f * weight
-            if (folder.contains(token)) score += 15f * weight
-            if (meta.contains(token)) score += 8f * weight
-            if (content.contains(token)) score += 25f * weight
+            if (QueryScoring.textContainsToken(folder, token)) score += 15f * weight
+            if (QueryScoring.textContainsToken(meta, token)) score += 8f * weight
+            if (QueryScoring.textContainsToken(content, token)) score += 35f * weight
         }
 
         score += filenameCoverageBoost(nameTokens, cleanTokens)
-
-        score *= MultilingualBridge.languageHintMultiplier(
-            query.languageHint, stub.name, meta, content
-        )
 
         for (period in query.periodHints) {
             val pLower = period.lowercase()
@@ -94,43 +90,56 @@ object LexicalSearch {
         val useSynonyms = cleanTokens.size < 2 && query.periodHints.isEmpty()
         if (useSynonyms) {
             for (token in synonymTokens) {
-                if (nameNorm.contains(token)) score += 4f
-                if (meta.contains(token)) score += 2f
+                if (QueryScoring.textContainsToken(nameNorm, token)) score += 4f
+                if (QueryScoring.textContainsToken(meta, token)) score += 2f
             }
         }
 
-        if (query.categoryHints.any { it in stub.categories }) score *= 1.15f
-
-        when {
-            query.typeHint?.contains("audio") == true -> {
-                if (ext in AUDIO_EXT) score *= 1.8f else if (ext in DOC_EXT) score *= 0.05f
-            }
-            query.typeHint?.contains("video") == true -> {
-                if (ext in VIDEO_EXT) score *= 1.8f else if (ext in DOC_EXT) score *= 0.05f
-            }
-            query.typeHint?.contains("photo") == true || query.typeHint?.contains("image") == true -> {
-                if (ext in IMAGE_EXT) score *= 1.8f else if (ext in DOC_EXT) score *= 0.05f
-            }
-            query.categoryHints.contains(Category.MEDIA) && isMediaQuery(cleanTokens) -> {
-                if (ext in DOC_EXT) score *= 0.05f
-                if (ext in AUDIO_EXT + VIDEO_EXT + IMAGE_EXT) score *= 1.5f
-            }
-        }
-
-        if (query.timeHint != null && stub.metadata.ageBucket == query.timeHint) score *= 1.1f
-
-        score *= QueryScoring.specificityMultiplier(
+        val langMult = MultilingualBridge.languageHintMultiplier(
+            query.languageHint, stub.name, meta, content
+        )
+        val categoryMult = if (query.categoryHints.any { it in stub.categories }) 1.15f else 1f
+        val timeMult = if (query.timeHint != null && stub.metadata.ageBucket == query.timeHint) 1.1f else 1f
+        val typeMult = typeHintMultiplier(query, ext)
+        val specificityMult = QueryScoring.specificityMultiplier(
             nameStem, meta, content, cleanTokens, query.periodHints
         )
-
-        score *= OwnerMatcher.scoreMultiplier(
+        val ownerMult = OwnerMatcher.scoreMultiplier(
             stub.metadata.ownerEntities,
             stub.metadata.ownerConfidence,
             query.ownerIntent,
             query.ownerTargetTokens
         )
 
+        score = QueryScoring.applyMultiplierChain(
+            score, langMult, categoryMult, timeMult, typeMult, specificityMult, ownerMult
+        )
+
         return score
+    }
+
+    private fun typeHintMultiplier(query: EnrichedQuery, ext: String): Float {
+        when {
+            query.typeHint?.contains("audio") == true -> {
+                if (ext in AUDIO_EXT) return 1.8f
+                if (ext in DOC_EXT) return QueryScoring.SOFT_MISMATCH_PENALTY
+            }
+            query.typeHint?.contains("video") == true -> {
+                if (ext in VIDEO_EXT) return 1.8f
+                if (ext in DOC_EXT) return QueryScoring.SOFT_MISMATCH_PENALTY
+            }
+            query.typeHint?.contains("photo") == true || query.typeHint?.contains("image") == true -> {
+                if (ext in IMAGE_EXT) return 1.8f
+                if (ext in DOC_EXT) return QueryScoring.SOFT_MISMATCH_PENALTY
+            }
+            query.categoryHints.contains(Category.MEDIA) && isMediaQuery(
+                query.coreTokens.ifEmpty { tokenize(query.cleanQueryForEmbedding) }
+            ) -> {
+                if (ext in DOC_EXT) return QueryScoring.SOFT_MISMATCH_PENALTY
+                if (ext in AUDIO_EXT + VIDEO_EXT + IMAGE_EXT) return 1.5f
+            }
+        }
+        return 1f
     }
 
     /** Boost when query tokens cover the filename stem (e.g. q2 + budget → q2_budget.txt). */

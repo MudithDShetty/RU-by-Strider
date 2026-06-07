@@ -173,13 +173,14 @@ fun buildDocumentSentence(
     val entityPart = entitiesToSentencePart(entities)
     val langPart   = MultilingualBridge.detectDominantLanguage(cleanName)?.let { " in $it" } ?: ""
 
-    val base = "${articleFor(catLabel)} $catLabel $typeLabel named $cleanName$langPart"
-    val entity = if (entityPart.isNotBlank()) " $entityPart" else ""
-    val content = if (!contentSnippet.isNullOrBlank()) " containing $contentSnippet" else ""
-    val time   = " last modified $agePart"
-    val loc    = " stored in $folder"
+    // Content first — embedding reads only the first ~64 tokens; junk filenames must not crowd out content.
+    val parts = mutableListOf<String>()
+    if (!contentSnippet.isNullOrBlank()) parts.add(contentSnippet.trim())
+    if (entityPart.isNotBlank()) parts.add(entityPart)
+    parts.add("${articleFor(catLabel)} $catLabel $typeLabel named $cleanName$langPart")
+    parts.add("last modified $agePart stored in $folder")
 
-    return "$base$entity$content$time$loc".take(400)
+    return parts.joinToString(" ").take(400)
 }
 
 fun buildMediaSentence(
@@ -198,12 +199,13 @@ fun buildMediaSentence(
     val catLabel  = categories.firstOrNull()?.label ?: "personal"
     val entityPart = entitiesToSentencePart(entities)
 
-    val base    = "${articleFor(catLabel)} $catLabel $typeLabel file named $cleanName"
-    val entity  = if (entityPart.isNotBlank()) " $entityPart" else ""
-    val details = if (!contentSnippet.isNullOrBlank()) " $contentSnippet" else ""
-    val loc     = " in $folder folder modified $agePart"
+    val parts = mutableListOf<String>()
+    if (!contentSnippet.isNullOrBlank()) parts.add(contentSnippet.trim())
+    if (entityPart.isNotBlank()) parts.add(entityPart)
+    parts.add("${articleFor(catLabel)} $catLabel $typeLabel file named $cleanName")
+    parts.add("in $folder folder modified $agePart")
 
-    return "$base$entity$details$loc".take(400)
+    return parts.joinToString(" ").take(400)
 }
 
 // ─────────────────────────────────────────────
@@ -226,19 +228,25 @@ fun extractFilenameSignals(nameWithoutExt: String): List<String> {
 // Category classifier
 // ─────────────────────────────────────────────
 
+private fun textContainsKeyword(text: String, tokens: Set<String>, keyword: String): Boolean {
+    if (keyword.contains(' ')) return text.contains(keyword)
+    return keyword in tokens
+}
+
 fun classifyCategories(file: File, contentSnippet: String?): List<Category> {
     val scores = mutableMapOf<Category, Int>()
     val lower = file.nameWithoutExtension.lowercase()
     val ext = file.extension.lowercase()
     val folderPath = file.absolutePath.lowercase()
     val allText = "$lower $folderPath ${contentSnippet ?: ""}".lowercase()
+    val tokens = MultilingualBridge.tokenize(allText).toSet()
 
-    // Keyword scoring
+    // Keyword scoring — whole-word for single tokens to avoid "id" matching inside "video"
     for (cat in Category.values()) {
         if (cat == Category.GENERAL) continue
         var score = 0
         for (kw in cat.keywords) {
-            if (allText.contains(kw)) score++
+            if (textContainsKeyword(allText, tokens, kw)) score++
         }
         if (score > 0) scores[cat] = score
     }
@@ -302,7 +310,8 @@ data class FileMetadata(
     val sizeBucket: String,
     val typeLabel: String,
     val ownerEntities: List<NameEntity> = emptyList(),
-    val ownerConfidence: Float = 0f
+    val ownerConfidence: Float = 0f,
+    val pdfMetadata: Map<String, String> = emptyMap()
 )
 
 // ─────────────────────────────────────────────
@@ -316,8 +325,20 @@ fun buildFileMetadata(file: File): FileMetadata {
     val ageBucket  = getAgeBucket(file.lastModified())
     val entities   = extractFilenameEntities(file.nameWithoutExtension)
 
+    val pdfBundle = if (ext == "pdf") {
+        try {
+            extractPdfBundle(file)
+        } catch (e: Exception) {
+            Log.w(TAG, "PDF bundle failed for ${file.name}: ${e.message}")
+            PdfExtract(null, emptyMap(), null)
+        }
+    } else null
+
     val contentSnip = try {
-        extractContent(file)
+        when {
+            pdfBundle != null -> pdfBundle.contentSnippet
+            else -> extractContent(file)
+        }
     } catch (e: Exception) {
         Log.w(TAG, "Content extraction failed for ${file.name}: ${e.message}")
         null
@@ -325,12 +346,13 @@ fun buildFileMetadata(file: File): FileMetadata {
 
     val categories = classifyCategories(file, contentSnip)
 
-    val pdfTitle = if (ext == "pdf") {
-        extractPdfMetadata(file)["title"]?.takeIf { it.isNotBlank() }
-    } else null
+    val pdfMeta = pdfBundle?.metadata ?: emptyMap()
+    val pdfTitle = pdfMeta["title"]?.takeIf { it.isNotBlank() }
 
-    val pdfMeta = if (ext == "pdf") extractPdfMetadata(file) else emptyMap()
-    val rawTextForNames = extractRawTextForOwnerNames(file)
+    val rawTextForNames = when {
+        pdfBundle?.rawText != null -> pdfBundle.rawText
+        else -> extractRawTextForOwnerNames(file)
+    }
     val ownerEntities = extractOwnerNames(file, rawTextForNames, pdfMeta)
     val ownerConfidence = OwnerMatcher.primaryConfidence(ownerEntities)
 
@@ -353,6 +375,7 @@ fun buildFileMetadata(file: File): FileMetadata {
         sizeBucket      = sizeBucket,
         typeLabel       = typeLabel,
         ownerEntities   = ownerEntities,
-        ownerConfidence = ownerConfidence
+        ownerConfidence = ownerConfidence,
+        pdfMetadata     = pdfMeta
     )
 }

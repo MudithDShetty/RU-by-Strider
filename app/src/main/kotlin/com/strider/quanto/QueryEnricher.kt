@@ -8,20 +8,29 @@ private const val TAG = "QueryEnricher"
 // Time hint extraction
 // ─────────────────────────────────────────────
 
-private val TIME_HINTS = listOf(
-    listOf("today", "tonight", "now", "latest", "just", "new") to "today",
-    listOf("this week", "weekly", "few days") to "this-week",
-    listOf("this month", "monthly", "lately", "recently") to "this-month",
-    listOf("last quarter", "quarter", "3 months", "three months") to "last-quarter",
-    listOf("this year", "annual", "yearly", "2024", "2025", "2026") to "this-year",
-    listOf("last year", "old", "older", "archive", "previous", "past", "ago",
-        "2020", "2021", "2022", "2023") to "older"
-)
+private fun buildTimeHints(): List<Pair<List<String>, String>> {
+    val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+    return listOf(
+        listOf("today", "tonight", "now", "latest", "just", "new") to "today",
+        listOf("this week", "weekly", "few days") to "this-week",
+        listOf("this month", "monthly", "lately", "recently") to "this-month",
+        listOf("last quarter", "quarter", "3 months", "three months") to "last-quarter",
+        listOf("this year", "annual", "yearly", year.toString()) to "this-year",
+        listOf("last year", "old", "older", "archive", "previous", "past", "ago",
+            (year - 1).toString(), (year - 2).toString(), (year - 3).toString()) to "older"
+    )
+}
 
 fun extractTimeHint(query: String): String? {
     val lower = query.lowercase()
-    for ((triggers, bucket) in TIME_HINTS) {
-        if (triggers.any { lower.contains(it) }) return bucket
+    for ((triggers, bucket) in buildTimeHints()) {
+        for (trigger in triggers) {
+            if (trigger.contains(' ')) {
+                if (lower.contains(trigger)) return bucket
+            } else if (Regex("\\b${Regex.escape(trigger)}\\b").containsMatchIn(lower)) {
+                return bucket
+            }
+        }
     }
     return null
 }
@@ -66,12 +75,17 @@ private val CATEGORY_QUERY_SIGNALS = mapOf(
 
 fun extractCategoryHints(query: String): List<Category> {
     val lower = query.lowercase()
+    val tokens = MultilingualBridge.tokenize(lower).toSet()
     val scores = mutableMapOf<Category, Int>()
 
     for ((cat, signals) in CATEGORY_QUERY_SIGNALS) {
         var score = 0
         for (signal in signals) {
-            if (lower.contains(signal)) score++
+            if (signal.contains(' ')) {
+                if (lower.contains(signal)) score++
+            } else if (signal in tokens) {
+                score++
+            }
         }
         if (score > 0) scores[cat] = score
     }
@@ -145,10 +159,11 @@ private val SYNONYMS = mapOf(
 
 fun expandWithSynonyms(query: String): String {
     val lower = query.lowercase()
+    val tokens = MultilingualBridge.tokenize(lower).toSet()
     val expansions = mutableListOf<String>()
 
     for ((word, synonyms) in SYNONYMS) {
-        if (lower.contains(word)) {
+        if (word in tokens) {
             expansions.add(synonyms)
         }
     }

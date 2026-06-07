@@ -127,30 +127,52 @@ fun extractPdfMetadata(file: File): Map<String, String> {
     }
 }
 
-fun extractPdfContent(file: File): String? {
-    if (file.length() == 0L) return null
+data class PdfExtract(
+    val contentSnippet: String?,
+    val metadata: Map<String, String>,
+    val rawText: String?
+)
+
+/** Single PDDocument load — content, metadata, and owner-name text together. */
+fun extractPdfBundle(file: File): PdfExtract {
+    if (file.length() == 0L) return PdfExtract(null, emptyMap(), null)
     return try {
         PDDocument.load(file).use { doc ->
-            if (doc.isEncrypted) return null
+            if (doc.isEncrypted) return PdfExtract(null, emptyMap(), null)
+
+            val info = doc.documentInformation
+            val metadata = mapOf(
+                "title"    to (info.title    ?: ""),
+                "author"   to (info.author   ?: ""),
+                "subject"  to (info.subject  ?: ""),
+                "keywords" to (info.keywords ?: ""),
+                "creator"  to (info.creator  ?: ""),
+                "pages"    to doc.numberOfPages.toString()
+            ).filter { it.value.isNotBlank() }
+
             val stripper = PDFTextStripper().apply {
                 startPage = 1
                 endPage   = minOf(3, doc.numberOfPages)
             }
-            val text = stripper.getText(doc).take(MAX_CHARS)
-            val meta = extractPdfMetadata(file)
+            val rawText = stripper.getText(doc).take(MAX_CHARS)
             val metaParts = listOfNotNull(
-                meta["title"]?.let { "title $it" },
-                meta["author"]?.let { "author $it" },
-                meta["keywords"]
+                metadata["title"]?.let { "title $it" },
+                metadata["author"]?.let { "author $it" },
+                metadata["keywords"]
             )
-            val combined = (cleanToKeywords(text) + " " + metaParts.joinToString(" ")).trim()
-            combined.ifBlank { null }
+            val contentSnippet = (cleanToKeywords(rawText) + " " + metaParts.joinToString(" "))
+                .trim()
+                .ifBlank { null }
+
+            PdfExtract(contentSnippet, metadata, rawText.ifBlank { null })
         }
     } catch (e: Exception) {
         Log.w(TAG, "PDF extract failed ${file.name}: ${e.message}")
-        null
+        PdfExtract(null, emptyMap(), null)
     }
 }
+
+fun extractPdfContent(file: File): String? = extractPdfBundle(file).contentSnippet
 
 // ─────────────────────────────────────────────
 // DOCX extractor

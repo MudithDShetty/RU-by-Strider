@@ -69,27 +69,27 @@ object GraniteReranker {
 
             var score = lexNorm * lexW + dense * denseW + overlap * 0.25f + nameCoverage * 0.20f
 
-            score *= QueryScoring.specificityMultiplier(
-                nameNorm, meta, content, coreTokens, query.periodHints
-            )
-
-            score *= MultilingualBridge.languageHintMultiplier(
+            val langMult = MultilingualBridge.languageHintMultiplier(
                 query.languageHint, file.name, meta, content
             )
-
-            if (query.categoryHints.any { it in file.categories }) score *= 1.12f
-            if (query.timeHint != null && file.metadata.ageBucket == query.timeHint) score *= 1.08f
-
-            score *= OwnerMatcher.scoreMultiplier(
+            val categoryMult = if (query.categoryHints.any { it in file.categories }) 1.12f else 1f
+            val timeMult = if (query.timeHint != null && file.metadata.ageBucket == query.timeHint) 1.08f else 1f
+            val specificityMult = QueryScoring.specificityMultiplier(
+                nameNorm, meta, content, coreTokens, query.periodHints
+            )
+            val ownerMult = OwnerMatcher.scoreMultiplier(
                 file.metadata.ownerEntities,
                 file.metadata.ownerConfidence,
                 query.ownerIntent,
                 query.ownerTargetTokens
             )
 
+            score = QueryScoring.applyMultiplierChain(
+                score, langMult, categoryMult, timeMult, specificityMult, ownerMult
+            ).coerceIn(0f, 1f)
             SearchResult(
                 file            = file,
-                score           = score.coerceIn(0f, 1f),
+                score           = score,
                 denseRank       = denseRankMap[file.path] ?: -1,
                 bm25Rank        = lexicalRankMap[file.path] ?: -1,
                 categoryMatched = query.categoryHints.any { it in file.categories }

@@ -241,62 +241,169 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         writableDatabase.execSQL("DELETE FROM $FTS_TABLE")
     }
 
-    fun loadStubs(): List<IndexedFileStub> {
+    fun loadAllPaths(): List<String> {
         val db = readableDatabase
-        val result = mutableListOf<IndexedFileStub>()
+        val paths = mutableListOf<String>()
+        val cursor = db.query(TABLE, arrayOf(COL_PATH), null, null, null, null, null)
+        cursor.use { while (it.moveToNext()) paths.add(it.getString(0)) }
+        return paths
+    }
 
+    fun loadRecentPaths(limit: Int): List<String> {
+        val db = readableDatabase
+        val paths = mutableListOf<String>()
         val cursor = db.query(
             TABLE,
-            arrayOf(
-                COL_PATH, COL_NAME, COL_EXT, COL_SIZE, COL_LAST_MODIFIED,
-                COL_CATEGORIES, COL_AGE_BUCKET, COL_SIZE_BUCKET,
-                COL_TYPE_LABEL, COL_CONTENT_SNIP, COL_METADATA_STR,
-                COL_OWNER_NAMES, COL_OWNER_CONF
-            ),
-            null, null, null, null, null
+            arrayOf(COL_PATH),
+            null, null, null, null,
+            "$COL_LAST_MODIFIED DESC",
+            limit.toString()
         )
-        cursor.use {
-            while (it.moveToNext()) {
-                try {
-                    val cats = it.getString(5)
-                        .split(",")
-                        .mapNotNull { name ->
-                            try { Category.valueOf(name) } catch (_: Exception) { null }
-                        }
+        cursor.use { while (it.moveToNext()) paths.add(it.getString(0)) }
+        return paths
+    }
 
-                    val ownerEntities = OwnerMatcher.deserializeEntities(
-                        if (it.columnCount > 11) it.getString(11) else null
-                    )
-                    val ownerConfidence = if (it.columnCount > 12) it.getFloat(12) else 0f
+    fun loadPathsByCategories(categories: List<Category>, limit: Int): List<String> {
+        if (categories.isEmpty()) return emptyList()
+        val db = readableDatabase
+        val clauses = categories.map { "$COL_CATEGORIES LIKE ?" }
+        val args = categories.map { "%${it.name}%" }.toTypedArray()
+        val paths = mutableListOf<String>()
+        val cursor = db.query(
+            TABLE,
+            arrayOf(COL_PATH),
+            clauses.joinToString(" OR "),
+            args,
+            null, null,
+            "$COL_LAST_MODIFIED DESC",
+            limit.toString()
+        )
+        cursor.use { while (it.moveToNext()) paths.add(it.getString(0)) }
+        return paths
+    }
 
-                    val metadata = FileMetadata(
-                        metadataString = it.getString(10),
-                        categories     = cats,
-                        contentSnippet = it.getString(9),
-                        ageBucket      = it.getString(6),
-                        sizeBucket     = it.getString(7),
-                        typeLabel      = it.getString(8),
-                        ownerEntities  = ownerEntities,
-                        ownerConfidence = ownerConfidence
-                    )
+    fun getCategoryCounts(): Map<Category, Int> {
+        val db = readableDatabase
+        return Category.values().mapNotNull { cat ->
+            val cursor = db.rawQuery(
+                "SELECT COUNT(*) FROM $TABLE WHERE $COL_CATEGORIES LIKE ?",
+                arrayOf("%${cat.name}%")
+            )
+            val count = cursor.use {
+                it.moveToFirst()
+                it.getInt(0)
+            }
+            if (count > 0) cat to count else null
+        }.toMap()
+    }
 
-                    result.add(IndexedFileStub(
-                        path         = it.getString(0),
-                        name         = it.getString(1),
-                        extension    = it.getString(2),
-                        sizeBytes    = it.getLong(3),
-                        lastModified = it.getLong(4),
-                        categories   = cats,
-                        metadata     = metadata
-                    ))
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to load stub row: ${e.message}")
+    fun loadStubsForPaths(paths: List<String>): List<IndexedFileStub> {
+        if (paths.isEmpty()) return emptyList()
+        val db = readableDatabase
+        val result = mutableListOf<IndexedFileStub>()
+        for (chunk in paths.distinct().chunked(900)) {
+            val placeholders = chunk.joinToString(",") { "?" }
+            val cursor = db.query(
+                TABLE,
+                arrayOf(
+                    COL_PATH, COL_NAME, COL_EXT, COL_SIZE, COL_LAST_MODIFIED,
+                    COL_CATEGORIES, COL_AGE_BUCKET, COL_SIZE_BUCKET,
+                    COL_TYPE_LABEL, COL_CONTENT_SNIP, COL_METADATA_STR,
+                    COL_OWNER_NAMES, COL_OWNER_CONF
+                ),
+                "$COL_PATH IN ($placeholders)",
+                chunk.toTypedArray(),
+                null, null, null
+            )
+            cursor.use {
+                while (it.moveToNext()) {
+                    parseStubRow(it)?.let { stub -> result.add(stub) }
                 }
             }
         }
-
-        Log.d(TAG, "Loaded ${result.size} file stubs from DB")
+        Log.d(TAG, "Loaded ${result.size} stubs for ${paths.size} paths")
         return result
+    }
+
+    private fun parseStubRow(it: android.database.Cursor): IndexedFileStub? {
+        return try {
+            val cats = it.getString(5)
+                .split(",")
+                .mapNotNull { name ->
+                    try { Category.valueOf(name) } catch (_: Exception) { null }
+                }
+
+            val ownerEntities = OwnerMatcher.deserializeEntities(
+                if (it.columnCount > 11) it.getString(11) else null
+            )
+            val ownerConfidence = if (it.columnCount > 12) it.getFloat(12) else 0f
+
+            val metadata = FileMetadata(
+                metadataString  = it.getString(10),
+                categories      = cats,
+                contentSnippet  = it.getString(9),
+                ageBucket       = it.getString(6),
+                sizeBucket      = it.getString(7),
+                typeLabel       = it.getString(8),
+                ownerEntities   = ownerEntities,
+                ownerConfidence = ownerConfidence
+            )
+
+            IndexedFileStub(
+                path         = it.getString(0),
+                name         = it.getString(1),
+                extension    = it.getString(2),
+                sizeBytes    = it.getLong(3),
+                lastModified = it.getLong(4),
+                categories   = cats,
+                metadata     = metadata
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse stub row: ${e.message}")
+            null
+        }
+    }
+
+    fun scanAllEmbeddingsTopK(queryEmb: FloatArray, topK: Int = 50): List<Pair<String, Float>> {
+        if (queryEmb.size != EmbeddingEngine.EMBEDDING_DIM) return emptyList()
+        val db = readableDatabase
+        val top = ArrayList<Pair<String, Float>>(topK)
+        val cursor = db.query(
+            TABLE,
+            arrayOf(COL_PATH, COL_EMBEDDING),
+            null, null, null, null, null
+        )
+        var scanned = 0
+        cursor.use {
+            while (it.moveToNext()) {
+                scanned++
+                val path = it.getString(0)
+                val emb = blobToFloatArray(it.getBlob(1))
+                var dot = 0f
+                for (i in queryEmb.indices) dot += queryEmb[i] * emb[i]
+                insertTopKByScore(top, path, dot.coerceIn(-1f, 1f), topK)
+            }
+        }
+        Log.d(TAG, "Full-library dense scan: $scanned files → top $topK")
+        return top.sortedByDescending { it.second }
+    }
+
+    private fun insertTopKByScore(
+        top: MutableList<Pair<String, Float>>,
+        path: String,
+        score: Float,
+        k: Int
+    ) {
+        when {
+            top.size < k -> {
+                top.add(path to score)
+                if (top.size == k) top.sortByDescending { it.second }
+            }
+            score > top.last().second -> {
+                top[k - 1] = path to score
+                top.sortByDescending { it.second }
+            }
+        }
     }
 
     fun loadEmbeddingsForPaths(paths: List<String>): Map<String, FloatArray> {

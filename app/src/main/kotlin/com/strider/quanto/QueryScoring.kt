@@ -3,6 +3,12 @@ package com.strider.quanto
 /** Shared token-matching logic for lexical + rerank stages. */
 object QueryScoring {
 
+    /** Minimum fraction of base score retained after multiplier chains — prevents silent burial. */
+    const val MULTIPLIER_FLOOR = 0.15f
+
+    /** Soft penalty when type/language/period detectors misfire — was 0.05–0.08, far too aggressive. */
+    const val SOFT_MISMATCH_PENALTY = 0.35f
+
     private val PERIOD_IN_NAME = Regex("q[1-4]")
 
     fun filenameStem(name: String): String =
@@ -12,6 +18,23 @@ object QueryScoring {
             .trim()
 
     fun tokenize(text: String): List<String> = MultilingualBridge.tokenize(text)
+
+    /** Whole-word match for tokens ≥3 chars; shorter tokens fall back to contains. */
+    fun textContainsToken(text: String, token: String): Boolean {
+        if (token.isBlank()) return false
+        return if (token.length >= 3) {
+            Regex("\\b${Regex.escape(token)}\\b").containsMatchIn(text)
+        } else {
+            text.contains(token)
+        }
+    }
+
+    /** Apply chained multipliers but never reduce below [MULTIPLIER_FLOOR] of base score. */
+    fun applyMultiplierChain(baseScore: Float, vararg multipliers: Float): Float {
+        if (baseScore <= 0f) return 0f
+        val combined = multipliers.fold(1f) { acc, m -> acc * m }
+        return baseScore * combined.coerceAtLeast(MULTIPLIER_FLOOR)
+    }
 
     /** How many query tokens appear in filename / metadata / content (0..1). */
     fun tokenMatchRatio(
@@ -69,7 +92,7 @@ object QueryScoring {
         }
 
         if (periodHints.isNotEmpty()) {
-            mult *= if (hasPeriodInName(nameStem, periodHints)) 2.5f else 0.06f
+            mult *= if (hasPeriodInName(nameStem, periodHints)) 2.5f else SOFT_MISMATCH_PENALTY
         }
 
         if (core.size >= 2 && filenameCoversAllTokens(nameStem, core)) {

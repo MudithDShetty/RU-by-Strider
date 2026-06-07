@@ -279,16 +279,20 @@ object MultilingualBridge {
     fun coreTokensFromList(tokens: List<String>): List<String> =
         tokens.filter { it !in MULTILINGUAL_STOP_WORDS && it.length > 1 }
 
+    /** Reverse lookup: token → alias set, precomputed once. */
+    private val ALIAS_LOOKUP: Map<String, Set<String>> = buildMap {
+        for ((key, aliases) in CONCEPT_ALIASES) {
+            for (form in aliases + key) {
+                put(form, aliases)
+            }
+        }
+    }
+
     fun expandTokens(tokens: List<String>): List<String> {
         val out = linkedSetOf<String>()
         for (token in tokens) {
             out.add(token)
-            CONCEPT_ALIASES[token]?.let { out.addAll(it) }
-            for ((key, aliases) in CONCEPT_ALIASES) {
-                if (token.length >= 4 && (token.contains(key) || aliases.any { token.contains(it) && it.length >= 4 })) {
-                    out.addAll(aliases)
-                }
-            }
+            ALIAS_LOOKUP[token]?.let { out.addAll(it) }
         }
         return out.filter { it.length > 1 }.toList()
     }
@@ -398,10 +402,10 @@ object MultilingualBridge {
             !fileHasScript(nameOnly, hint)
 
         return when {
-            nameMatches -> 6f
-            bodyMatches && !nameLatinOnly -> 2.5f
-            nameLatinOnly || (!nameMatches && !bodyMatches) -> 0.08f
-            else -> 0.5f
+            nameMatches -> 1.5f
+            bodyMatches && !nameLatinOnly -> 1.2f
+            nameLatinOnly || (!nameMatches && !bodyMatches) -> 0.7f
+            else -> 0.85f
         }
     }
 
