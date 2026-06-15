@@ -20,13 +20,15 @@ data class NameEntity(
 ) {
     fun matchesTarget(targetTokens: List<String>, partialOk: Boolean = true): Boolean {
         if (targetTokens.isEmpty() || tokens.isEmpty()) return false
-        val targetSet = targetTokens.toSet()
-        val entitySet = tokens.toSet()
+        val targetSet = targetTokens.map { it.lowercase() }.toSet()
+        val entitySet = tokens.map { it.lowercase() }.toSet()
         if (targetSet.all { it in entitySet }) return true
-        if (partialOk && targetSet.any { t -> entitySet.any { e -> e == t || e.contains(t) || t.contains(e) } }) {
-            return true
+        if (!partialOk) return false
+        val entityText = entitySet.joinToString(" ")
+        return targetSet.any { t ->
+            entitySet.any { e -> e == t || QueryScoring.tokenMatchesGluedWord(e, t) } ||
+                QueryScoring.textContainsToken(entityText, t)
         }
-        return false
     }
 }
 

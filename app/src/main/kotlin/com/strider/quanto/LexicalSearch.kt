@@ -34,7 +34,7 @@ object LexicalSearch {
 
         val synonymTokens = tokenize(query.keywordsForBm25)
             .filter { it !in matchTokens.toSet() }
-            .take(8)
+            .take(SearchWeights.MAX_SYNONYM_TOKENS)
 
         val hits = stubs.mapNotNull { stub ->
             val score = score(stub, matchTokens, cleanTokens, synonymTokens, query)
@@ -61,49 +61,58 @@ object LexicalSearch {
         val nameTokens = nameStem.split(Regex("\\s+")).filter { it.isNotBlank() }
         val meta     = stub.metadata.metadataString.lowercase()
         val content  = stub.metadata.contentSnippet?.lowercase() ?: ""
+        val entities = stub.metadata.extractedEntities.joinToString(" ").lowercase()
         val folder   = stub.path.substringBeforeLast("/").substringAfterLast("/").lowercase()
         val ext      = stub.extension.lowercase()
         var score    = 0f
 
         for (token in matchTokens) {
             val isCore = token in cleanTokens
-            val weight = if (isCore) 1f else 0.65f
+            val weight = if (isCore) 1f else SearchWeights.LEX_SYNONYM_TOKEN_WEIGHT
             when {
-                nameNorm == token || nameRaw == "$token.${stub.extension}" -> score += 100f * weight
-                nameNorm.startsWith("$token ") || nameNorm.endsWith(" $token") -> score += 80f * weight
-                QueryScoring.textContainsToken(nameNorm, token) -> score += 50f * weight
+                nameNorm == token || nameRaw == "$token.${stub.extension}" ->
+                    score += SearchWeights.LEX_NAME_EXACT * weight
+                nameNorm.startsWith("$token ") || nameNorm.endsWith(" $token") ->
+                    score += SearchWeights.LEX_NAME_EDGE * weight
+                QueryScoring.textContainsToken(nameNorm, token) ->
+                    score += SearchWeights.LEX_NAME_CONTAINS * weight
             }
-            if (ext == token) score += 40f * weight
-            if (QueryScoring.textContainsToken(folder, token)) score += 15f * weight
-            if (QueryScoring.textContainsToken(meta, token)) score += 8f * weight
-            if (QueryScoring.textContainsToken(content, token)) score += 35f * weight
+            if (ext == token) score += SearchWeights.LEX_EXT_MATCH * weight
+            if (QueryScoring.textContainsToken(folder, token)) score += SearchWeights.LEX_FOLDER * weight
+            if (QueryScoring.textContainsToken(meta, token)) score += SearchWeights.LEX_META * weight
+            if (QueryScoring.textContainsToken(content, token)) score += SearchWeights.LEX_CONTENT * weight
+            if (QueryScoring.textContainsToken(entities, token)) score += SearchWeights.LEX_ENTITY * weight
         }
 
-        score += filenameCoverageBoost(nameTokens, cleanTokens)
+        if (query.queryType == QueryType.PERSON_NAME && entities.isNotBlank()) {
+            val entityHits = cleanTokens.count { QueryScoring.textContainsToken(entities, it) }
+            if (entityHits == cleanTokens.size) score += SearchWeights.LEX_PERSON_NAME_FULL
+            else if (entityHits > 0) score += entityHits * SearchWeights.LEX_PERSON_NAME_PER_HIT
+        }
+
+        score += QueryScoring.filenameCoverageBoost(nameTokens, cleanTokens)
 
         for (period in query.periodHints) {
             val pLower = period.lowercase()
-            if (nameNorm.contains(pLower) || meta.contains(pLower)) score += 90f
+            if (QueryScoring.textContainsToken(nameNorm, pLower) ||
+                QueryScoring.textContainsToken(meta, pLower)
+            ) {
+                score += SearchWeights.LEX_PERIOD_HIT
+            }
         }
 
-        // Synonyms only help single-token vague queries — skip when query is specific
         val useSynonyms = cleanTokens.size < 2 && query.periodHints.isEmpty()
         if (useSynonyms) {
             for (token in synonymTokens) {
-                if (QueryScoring.textContainsToken(nameNorm, token)) score += 4f
-                if (QueryScoring.textContainsToken(meta, token)) score += 2f
+                if (QueryScoring.textContainsToken(nameNorm, token)) score += SearchWeights.LEX_SYNONYM_NAME
+                if (QueryScoring.textContainsToken(meta, token)) score += SearchWeights.LEX_SYNONYM_META
             }
         }
 
         val langMult = MultilingualBridge.languageHintMultiplier(
             query.languageHint, stub.name, meta, content
         )
-        val categoryMult = if (query.categoryHints.any { it in stub.categories }) 1.15f else 1f
-        val timeMult = if (query.timeHint != null && stub.metadata.ageBucket == query.timeHint) 1.1f else 1f
         val typeMult = typeHintMultiplier(query, ext)
-        val specificityMult = QueryScoring.specificityMultiplier(
-            nameStem, meta, content, cleanTokens, query.periodHints
-        )
         val ownerMult = OwnerMatcher.scoreMultiplier(
             stub.metadata.ownerEntities,
             stub.metadata.ownerConfidence,
@@ -111,9 +120,8 @@ object LexicalSearch {
             query.ownerTargetTokens
         )
 
-        score = QueryScoring.applyMultiplierChain(
-            score, langMult, categoryMult, timeMult, typeMult, specificityMult, ownerMult
-        )
+        // Category/time boosts apply in reranker only — avoids double-counting with GraniteReranker.
+        score = QueryScoring.applyMultiplierChain(score, langMult, typeMult, ownerMult)
 
         return score
     }
@@ -121,41 +129,25 @@ object LexicalSearch {
     private fun typeHintMultiplier(query: EnrichedQuery, ext: String): Float {
         when {
             query.typeHint?.contains("audio") == true -> {
-                if (ext in AUDIO_EXT) return 1.8f
+                if (ext in AUDIO_EXT) return SearchWeights.LEX_TYPE_MATCH_MULT
                 if (ext in DOC_EXT) return QueryScoring.SOFT_MISMATCH_PENALTY
             }
             query.typeHint?.contains("video") == true -> {
-                if (ext in VIDEO_EXT) return 1.8f
+                if (ext in VIDEO_EXT) return SearchWeights.LEX_TYPE_MATCH_MULT
                 if (ext in DOC_EXT) return QueryScoring.SOFT_MISMATCH_PENALTY
             }
             query.typeHint?.contains("photo") == true || query.typeHint?.contains("image") == true -> {
-                if (ext in IMAGE_EXT) return 1.8f
+                if (ext in IMAGE_EXT) return SearchWeights.LEX_TYPE_MATCH_MULT
                 if (ext in DOC_EXT) return QueryScoring.SOFT_MISMATCH_PENALTY
             }
             query.categoryHints.contains(Category.MEDIA) && isMediaQuery(
                 query.coreTokens.ifEmpty { tokenize(query.cleanQueryForEmbedding) }
             ) -> {
                 if (ext in DOC_EXT) return QueryScoring.SOFT_MISMATCH_PENALTY
-                if (ext in AUDIO_EXT + VIDEO_EXT + IMAGE_EXT) return 1.5f
+                if (ext in AUDIO_EXT + VIDEO_EXT + IMAGE_EXT) return SearchWeights.LEX_MEDIA_MATCH_MULT
             }
         }
         return 1f
-    }
-
-    /** Boost when query tokens cover the filename stem (e.g. q2 + budget → q2_budget.txt). */
-    private fun filenameCoverageBoost(nameTokens: List<String>, queryTokens: List<String>): Float {
-        if (nameTokens.isEmpty() || queryTokens.isEmpty()) return 0f
-        val querySet = queryTokens.toSet()
-        val matchedInName = nameTokens.count { nt ->
-            querySet.any { q -> nt == q || nt.contains(q) || q.contains(nt) }
-        }
-        if (matchedInName == 0) return 0f
-
-        var boost = (matchedInName.toFloat() / nameTokens.size) * 80f
-        if (nameTokens.all { nt -> querySet.any { q -> nt == q || nt.contains(q) || q.contains(nt) } }) {
-            boost += 100f
-        }
-        return boost
     }
 
     private fun isMediaQuery(tokens: List<String>): Boolean =

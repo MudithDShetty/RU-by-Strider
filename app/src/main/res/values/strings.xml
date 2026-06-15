@@ -5,6 +5,9 @@
     <string name="tagline_hi">अपनी भाषा में कुछ भी ढूंढें</string>
     <string name="hint_search_en">Search your files…</string>
     <string name="hint_search_hi">अपनी files ढूंढें…</string>
+    <string name="hint_debug_target">Debug: expected filename (e.g. invoice.pdf)</string>
+    <string name="debug_report_title">Search rank report</string>
+    <string name="debug_tap_status">Tap status for full rank report</string>
     <string name="btn_index">Index Files</string>
     <string name="btn_reindex">Re-index</string>
     <string name="btn_search">Search</string>

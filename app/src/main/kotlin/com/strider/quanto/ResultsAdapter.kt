@@ -58,7 +58,11 @@ class ResultsAdapter(
                     else -> "?"
                 }
                 val catTag = if (result.categoryMatched) " ✓cat" else ""
-                "${result.scorePercent}% [$branch]$catTag"
+                val rankTag = buildString {
+                    if (result.denseRank >= 0) append(" d#${result.denseRank + 1}")
+                    if (result.bm25Rank >= 0) append(" l#${result.bm25Rank + 1}")
+                }
+                "${result.scorePercent}% [$branch$rankTag]$catTag"
             } else {
                 "${result.scorePercent}%"
             }
@@ -98,8 +102,8 @@ class ResultsAdapter(
     }
 
     companion object {
-        /** Set to false before release. Shows BM25/DENSE fusion debug badges. */
-        const val HYBRID_DEV_MODE = true
+        /** Debug builds only — fusion badges and golden eval logging. */
+        val HYBRID_DEV_MODE: Boolean = BuildConfig.DEBUG
 
         private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<SearchResult>() {
             override fun areItemsTheSame(a: SearchResult, b: SearchResult) =

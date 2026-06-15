@@ -232,10 +232,12 @@ When semantic search is enabled:
 ### Stage 2 — Reciprocal Rank Fusion
 
 ```text
-RRF_score(path) = 3 / (60 + lexical_rank) + 1 / (60 + dense_rank)
+RRF_score(path) = 1.5 / (60 + lexical_rank) + 1 / (60 + dense_rank)
 ```
 
-Lexical hits receive 3× weight (`BM25_RRF_WEIGHT = 3`) because filename matches are often decisive. Top 25 fused paths proceed to reranking.
+Lexical hits receive 1.5× weight (`SearchWeights.LEXICAL_RRF_WEIGHT`) because filename matches are often decisive. Filename and content SQL hits are pinned into the rerank pool regardless of RRF rank.
+
+**Token matching:** queries use word-boundary matching for tokens ≥3 chars; short tokens (1–2 chars) match via stem-token prefix/suffix only (see `SearchWeights` KNOWN_LIMITATIONS).
 
 ### Stage 3 — Granite Reranker
 

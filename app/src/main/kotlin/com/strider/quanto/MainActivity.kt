@@ -14,6 +14,10 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.appcompat.app.AlertDialog
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.MimeTypeMap
@@ -71,6 +75,7 @@ class MainActivity : AppCompatActivity() {
     private var searchJob: Job? = null
     private var searchDebounceJob: Job? = null
     private var searchGeneration = 0
+    private var lastTargetReport: TargetFileReport? = null
 
     private var pendingShareResults: List<SearchResult>? = null
     private var pendingShareIndex = 0
@@ -188,13 +193,18 @@ class MainActivity : AppCompatActivity() {
 
         homeBinding.btnIndexShortcut.setOnClickListener { showScreen(Screen.INDEX) }
 
+        if (ResultsAdapter.HYBRID_DEV_MODE) {
+            homeBinding.etDebugTarget.visibility = View.VISIBLE
+        }
+        homeBinding.tvStatus.setOnClickListener { showDebugReportDialog() }
+
         homeBinding.etSearch.apply {
             isFocusable = true
             isFocusableInTouchMode = true
             setOnEditorActionListener { _, actionId, _ ->
                 if (actionId == EditorInfo.IME_ACTION_SEARCH) {
                     searchDebounceJob?.cancel()
-                    performSearchWithFilter(null, semanticEnabled = isSemanticEnabled())
+                    performSearch()
                     true
                 } else false
             }
@@ -210,9 +220,8 @@ class MainActivity : AppCompatActivity() {
                         return
                     }
                     searchDebounceJob = lifecycleScope.launch {
-                        delay(450)
-                        // Fast lexical preview while typing; full Granite on keyboard Search
-                        performSearchWithFilter(null, semanticEnabled = false)
+                        delay(searchDebounceMs())
+                        performSearch()
                     }
                 }
             })
@@ -672,6 +681,12 @@ class MainActivity : AppCompatActivity() {
     private fun isSemanticEnabled(): Boolean =
         prefs.getBoolean(PREF_SEMANTIC_RERANK, true)
 
+    /** Same debounce for all library sizes; typing and IME Search share one pipeline. */
+    private fun searchDebounceMs(): Long {
+        val largeLibrary = ::indexer.isInitialized && indexer.size >= 5_000
+        return if (largeLibrary) 600L else 500L
+    }
+
     private fun performSearch() {
         performSearchWithFilter(null, semanticEnabled = isSemanticEnabled())
     }
@@ -722,7 +737,15 @@ class MainActivity : AppCompatActivity() {
             try {
                 val enriched = enrichQuery(rawQuery, UserProfile.getNameTokens(this@MainActivity))
                 val useSemantic = semanticEnabled || enriched.actionIntent != null
-                var results  = indexer.search(enriched, topK = 20, semanticEnabled = useSemantic)
+                val trackHint = homeBinding.etDebugTarget.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                val outcome = indexer.searchWithDiagnostics(
+                    enriched,
+                    topK = 20,
+                    semanticEnabled = useSemantic,
+                    trackHint = trackHint
+                )
+                var results = outcome.results
+                lastTargetReport = outcome.diagnostics?.targetReport
 
                 if (!categoryFilter.isNullOrEmpty()) {
                     results = results.filter { r ->
@@ -747,7 +770,8 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                     } else {
-                        showStatus(statusForSearchResults(results, rawQuery, indexedCount, enriched.categoryHints))
+                        val base = statusForSearchResults(results, rawQuery, indexedCount, enriched.categoryHints)
+                        showStatus(base + (lastTargetReport?.summaryLine()?.let { "\n$it" } ?: ""))
                     }
                 }
             } catch (e: CancellationException) {
@@ -936,6 +960,27 @@ class MainActivity : AppCompatActivity() {
         if (::homeBinding.isInitialized) homeBinding.tvStatus.text = msg
     }
 
+    private fun showDebugReportDialog() {
+        val report = lastTargetReport
+        if (report == null) {
+            if (ResultsAdapter.HYBRID_DEV_MODE) {
+                showToast(getString(R.string.debug_tap_status))
+            }
+            return
+        }
+        val body = report.detailLines().joinToString("\n")
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.debug_report_title))
+            .setMessage(body)
+            .setPositiveButton("Copy") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("search debug", body))
+                showToast("Copied")
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
     private fun showProgress(show: Boolean) {
         if (::homeBinding.isInitialized)
             homeBinding.progressBar.visibility = if (show) View.VISIBLE else View.GONE
@@ -960,6 +1005,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             db.deleteFiles(db.getStoredFileMeta().keys.toList())
             db.ftsClear()
+            db.invalidateEmbeddingCache()
             indexer.clear()
             withContext(Dispatchers.Main) {
                 indexBinding.tvIndexCount.text = "0"

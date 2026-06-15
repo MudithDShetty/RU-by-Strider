@@ -118,6 +118,10 @@ class StriderApp : Application() {
 
                     if (count > 0) {
                         launch { indexer.runDeferredFtsBackfill() }
+                        launch {
+                            db.warmEmbeddingCache()
+                            Log.i(TAG, "Embedding RAM cache ready: ${db.isEmbeddingCacheWarm()} (${indexer.size} files)")
+                        }
                     }
                 }
 

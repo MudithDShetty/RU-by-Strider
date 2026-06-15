@@ -412,12 +412,12 @@ object MultilingualBridge {
     /** True when a token strongly matches the filename (used to avoid filler-token penalties). */
     fun hasStrongFilenameHit(nameStem: String, tokens: List<String>): Boolean =
         tokens.any { t ->
-            t.length >= 4 && (
+            t.length >= 3 && (
                 nameStem == t ||
                     nameStem.startsWith("$t ") ||
                     nameStem.endsWith(" $t") ||
-                    nameStem.contains(" $t ") ||
-                    nameStem.contains(t)
+                    QueryScoring.textContainsToken(nameStem, t) ||
+                    QueryScoring.tokenMatchesGlued(nameStem, t)
                 )
         }
 }

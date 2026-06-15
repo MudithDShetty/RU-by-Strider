@@ -311,7 +311,9 @@ data class FileMetadata(
     val typeLabel: String,
     val ownerEntities: List<NameEntity> = emptyList(),
     val ownerConfidence: Float = 0f,
-    val pdfMetadata: Map<String, String> = emptyMap()
+    val pdfMetadata: Map<String, String> = emptyMap(),
+    /** Party/person names — searchable via SQL; kept out of embed string. */
+    val extractedEntities: List<String> = emptyList()
 )
 
 // ─────────────────────────────────────────────
@@ -356,26 +358,35 @@ fun buildFileMetadata(file: File): FileMetadata {
     val ownerEntities = extractOwnerNames(file, rawTextForNames, pdfMeta)
     val ownerConfidence = OwnerMatcher.primaryConfidence(ownerEntities)
 
-    val metadataString = (if (ext in MEDIA_EXTENSIONS) {
-        buildMediaSentence(file, contentSnip, categories, ageBucket, entities)
-    } else {
-        buildDocumentSentence(file, contentSnip, categories, ageBucket, entities, pdfTitle)
-    }).let { base ->
-        val ownerPart = OwnerMatcher.primaryTokensForFts(ownerEntities)
-        if (ownerPart.isNotBlank()) "$base belonging to $ownerPart".take(400) else base
+    val entitySourceText = when {
+        pdfBundle?.entityRawText != null -> pdfBundle.entityRawText
+        pdfBundle?.rawText != null -> pdfBundle.rawText
+        else -> rawTextForNames
+    }
+    val extractedEntities = buildExtractedEntities(entitySourceText, ownerEntities)
+
+    val contextualSnippet = contentSnip?.let { snip ->
+        stripEntityTokensFromKeywords(snip, extractedEntities).ifBlank { snip }
     }
 
-    Log.d(TAG, "${file.name} → $metadataString")
+    val metadataString = if (ext in MEDIA_EXTENSIONS) {
+        buildMediaSentence(file, contextualSnippet, categories, ageBucket, entities)
+    } else {
+        buildDocumentSentence(file, contextualSnippet, categories, ageBucket, entities, pdfTitle)
+    }
+
+    Log.d(TAG, "${file.name} → $metadataString (entities=${extractedEntities.take(4)})")
 
     return FileMetadata(
-        metadataString  = metadataString,
-        categories      = categories,
-        contentSnippet  = contentSnip,
-        ageBucket       = ageBucket,
-        sizeBucket      = sizeBucket,
-        typeLabel       = typeLabel,
-        ownerEntities   = ownerEntities,
-        ownerConfidence = ownerConfidence,
-        pdfMetadata     = pdfMeta
+        metadataString    = metadataString,
+        categories        = categories,
+        contentSnippet    = contextualSnippet,
+        ageBucket         = ageBucket,
+        sizeBucket        = sizeBucket,
+        typeLabel         = typeLabel,
+        ownerEntities     = ownerEntities,
+        ownerConfidence   = ownerConfidence,
+        pdfMetadata       = pdfMeta,
+        extractedEntities = extractedEntities
     )
 }

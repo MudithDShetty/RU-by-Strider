@@ -1,408 +1,262 @@
-# Strider Quanto — Engineering Tasks
+# StriderQuanto Search — Problem & Solution Handoff
 
-## Problem 1: Model Loads Every App Open (CRITICAL UX)
+**Context:** ~24k files indexed on phone. Typing results are okay; keyboard Search is good. Most users **don't press Search** — they need typing to use the **same pipeline**. Person names inside PDFs (e.g. `Tanuj`, `Nikharv` in `NDA- Quantoo .pdf`) rank ~#1500 and don't surface.
 
-### What's happening
+**Do not re-fix already merged work unless regressions appear.** This doc is for the next implementation thread.
 
-`EmbeddingEngine.initialize()` is called in `MainActivity.onCreate()` every single time the app comes to foreground. The 390MB ONNX model is copied from assets → cache and a new `OrtSession` is created each time. This takes 4-8 seconds on mid-range hardware, completely defeating the purpose of a search utility app.
+---
+
+## Architecture (current)
+
+```
+Typing (debounced)  →  often lexical + filename; semantic only if library ≥5k
+Keyboard Search     →  full hybrid: FTS pool → lexical → dense scan (top-K) → RRF → GraniteReranker
+
+Indexing: buildFileMetadata → embed ~400 char metadataString (96 tokens) → SQLite + FTS keywords
+Search debug: etDebugTarget + tap status line (SearchDebug logcat)
+```
+
+**Key files:** `MainActivity.kt`, `SearchPipeline.kt`, `DiskSearch.kt`, `RetrievalScaling.kt`, `EmbeddingIndex.kt`, `FilenameSearch.kt`, `DatabaseHelper.kt`, `FileIndexer.kt`, `ContentExtractor.kt`, `OwnerExtraction.kt`, `GraniteReranker.kt`, `LexicalSearch.kt`, `SearchDiagnostics.kt`
+
+---
+
+## Problem 1 — Typing ≠ Search (most users never press Search)
+
+### Symptom
+- While typing: okay but not as good as Search.
+- After Search: good.
+- Users expect live results to be final.
 
 ### Root cause
+Two modes in `MainActivity.kt`:
+- `TextWatcher` → debounced, historically `semanticEnabled = false` (now semantic preview only if `indexer.size >= 5000`).
+- `IME_ACTION_SEARCH` → always full hybrid.
 
-The `OrtSession` object lives inside `EmbeddingEngine` which is scoped to `MainActivity`. When the activity is destroyed (user switches apps, phone sleeps), the session is closed in `onDestroy()` and recreated next open.
+Same user query, different pipelines.
 
-### What needs to be done
+### Solution
+1. **Single pipeline:** both triggers call the same `searchWithDiagnostics(..., semanticEnabled = true)` (or one `performSearch()` with no mode flag).
+2. **Debounce:** 500–700ms; keep `searchGeneration` stale guard.
+3. **Optional progressive UI:** show filename/lexical hits in ~100ms, replace when ONNX hybrid finishes (same final ranking as Search).
+4. **Product:** hint "Results update as you type"; don't imply Search is required (`IME_ACTION_DONE` or neutral action).
 
-**1a. Move EmbeddingEngine into a persistent Application class**
-
-Create `StriderApp.kt` extending `Application`. Initialize the engine once here. Register it in `AndroidManifest.xml` with `android:name=".StriderApp"`. MainActivity should call `(application as StriderApp).engine` — never initialize itself.
-
-```kotlin
-class StriderApp : Application() {
-    lateinit var engine: EmbeddingEngine
-    lateinit var indexer: FileIndexer
-
-    override fun onCreate() {
-        super.onCreate()
-        // Initialize in background once, stays alive for app process lifetime
-        applicationScope.launch(Dispatchers.IO) {
-            engine = EmbeddingEngine(this@StriderApp)
-            engine.initialize()
-            indexer = FileIndexer(engine)
-        }
-    }
-}
-
-```
-
-**1b. Cache the model file check properly** The current code already copies to `cacheDir` but checks `modelFile.exists()` — this is correct but `cacheDir` can be cleared by Android. Use `filesDir` instead (not cleared automatically):
-
-```kotlin
-val modelFile = File(context.filesDir, "embedding_model.onnx")
-
-```
-
-**1c. Do NOT close the session in onDestroy** Remove `engine.close()` from `MainActivity.onDestroy()`. The Application class manages the lifecycle. The session should stay open for the entire process lifetime.
-
-**1d. Show a one-time loading screen only on first install** Use `SharedPreferences` to track whether the model has been copied:
-
-```kotlin
-val prefs = getSharedPreferences("strider_prefs", MODE_PRIVATE)
-val modelReady = prefs.getBoolean("model_copied", false)
-
-```
-
-On first launch: show full-screen loading UI with progress. On subsequent launches: engine is already warm in Application, show app immediately.
-
-**1e. Keep OrtSession warm with a dummy inference** After initialization, run one dummy embed() call with empty string so the JIT-compiled inference path is warm and first real search is instant:
-
-```kotlin
-engine.embed("warmup") // throwaway call after init
-
-```
-
-### Expected result
-
-- First install: one-time 4-8s loading screen shown explicitly
-- Every subsequent open: app ready instantly, no loading at all
-- Session persists across activity back-stack, screen off, app switching
+### Acceptance
+Same query typed (wait for debounce, no Search) vs Search → **same file in top 3** (ideally #1).
 
 ---
 
-## Problem 2: Indexing Is Too Slow (PERFORMANCE)
+## Problem 2 — Accuracy collapses as library grows (3k → 24k)
 
-### What's happening
+### Symptom
+Good at ~3k files; bad at ~24k.
 
-Current indexer processes files sequentially — one file at a time. Each file requires:
+### Root cause
+Retrieval was tuned for small libraries:
+- Dense scan kept only **top 50–80** of ~24k (~0.3%).
+- FTS/candidate pool capped ~500–1800.
+- "Recent files" flooded the lexical pool.
 
-1. Building embedding text string
-2. BPE tokenization (~5ms)
-3. ONNX inference (~200-800ms on low-end CPU)
-4. Storing result
+### Already implemented (verify, don't redo)
+- `RetrievalScaling.kt` — dense top-K ~**350** at 24k, wider RRF/rerank pools.
+- Full-library dense scan in `SearchPipeline.denseRetrieve()`.
+- `EmbeddingIndex.kt` — RAM cache (~37 MB @ 24k).
+- `DiskSearch.kt` — scaled FTS/category caps; reduced recent-file injection.
+- `StriderApp` — `warmEmbeddingCache()` on startup.
 
-For 1000 files this means 200-800 seconds (3-13 minutes). Unacceptable.
+### Remaining gap
+Files at dense rank **351–1500+** still dropped before rerank. **Raising top-K alone is not enough** at 24k (too many files score ~0.45–0.55).
 
-### Research findings on embedding speed optimization
-
-**Finding 1: Batched inference is 3-5x faster than sequential** ONNX Runtime supports batched inputs. Instead of shape `[1, seq_len]`, use `[batch_size, seq_len]`. Process 8-16 files at once in a single model forward pass. Tradeoff: all sequences in a batch must be padded to the same length (longest in batch). For short filenames (avg ~10 tokens) this overhead is negligible.
-
-**Finding 2: Smaller token length for filename-only indexing** Filenames rarely exceed 20 tokens. Using MAX_SEQ_LEN=512 is wasteful. For Phase 1 (filename indexing), use MAX_SEQ_LEN=64. This reduces inference time by ~60% with zero quality loss for short text.
-
-**Finding 3: Parallel tokenization + serial inference** Tokenization is CPU-bound but fast (~5ms). Inference is the bottleneck. Use a producer-consumer pattern:
-
-- Coroutine A: tokenizes files and fills a Channel
-- Coroutine B: reads batches from Channel and runs inference This keeps the inference pipeline fed without gaps.
-
-**Finding 4: Skip already-indexed files** Store a hash (last-modified timestamp + file size) alongside each embedding. On re-index, skip files whose hash hasn't changed. First index: slow. Every subsequent index: only processes new/changed files.
-
-**Finding 5: Index priority tiers** Not all files are equally important to index first. Process in this order:
-
-- Tier 1 (index first): Documents folder, Downloads folder, recent files
-- Tier 2: DCIM/Camera, WhatsApp media
-- Tier 3: Everything else This means useful results appear within 30 seconds even if full index takes longer.
-
-### What needs to be done
-
-**2a. Implement batched inference in EmbeddingEngine**
-
-```kotlin
-fun embedBatch(texts: List<String>): List<FloatArray> {
-    val batchSize = texts.size
-    val encoded = texts.map { tokenizer.encode(it, MAX_SEQ_LEN_SHORT) }
-    val maxLen = encoded.maxOf { it.inputIds.size }
-
-    // Pad all sequences to maxLen
-    val inputIds = LongArray(batchSize * maxLen)
-    val attentionMask = LongArray(batchSize * maxLen)
-    val tokenTypeIds = LongArray(batchSize * maxLen)
-
-    for ((i, enc) in encoded.withIndex()) {
-        for ((j, id) in enc.inputIds.withIndex()) {
-            inputIds[i * maxLen + j] = id
-            attentionMask[i * maxLen + j] = enc.attentionMask[j]
-        }
-        // Padding positions stay 0 (already initialized)
-    }
-
-    val shape = longArrayOf(batchSize.toLong(), maxLen.toLong())
-    // ... run inference, return CLS vector for each item in batch
-}
-
-```
-
-**2b. Reduce MAX_SEQ_LEN for filename indexing to 64** Add a constant `MAX_SEQ_LEN_SHORT = 64` used exclusively by FileIndexer. Keep `MAX_SEQ_LEN = 512` for query embedding (queries can be long sentences).
-
-**2c. Implement incremental indexing with hash cache** Store index as a map of `filePath → IndexEntry(embedding, lastModified, fileSize)`. Persist to `filesDir/index.bin` using `ObjectOutputStream`. On startup, load existing index. During indexing, only process changed files.
-
-```kotlin
-data class IndexEntry(
-    val path: String,
-    val name: String,
-    val extension: String,
-    val sizeBytes: Long,
-    val embedding: FloatArray,
-    val lastModified: Long,  // for change detection
-    val fileSize: Long       // for change detection
-)
-
-```
-
-**2d. Priority-ordered directory scanning**
-
-```kotlin
-val PRIORITY_DIRS = listOf(
-    "Documents", "Downloads", "DCIM/Camera",
-    "WhatsApp/Media", "Pictures", "Music", "Movies"
-)
-// Scan priority dirs first, emit results immediately
-// Then scan remaining dirs in background
-
-```
-
-**2e. Batch size tuning for Redmi 8A** Snapdragon 439 has 4 efficiency + 4 performance cores. Recommended batch size: 8 (fits in L2 cache, balances throughput vs latency). Make it configurable: `val BATCH_SIZE = 8`
-
-### Expected result
-
-- Batch inference: 3-5x speedup (8 files per forward pass)
-- Short sequence length: 2-3x speedup for filename indexing
-- Combined: 6-10x total speedup
-- 1000 files: from 10 minutes → 60-90 seconds
-- With incremental indexing: re-index in seconds after first run
+### Solution (if still failing after filename/content fixes)
+- **Tiered retrieval:** cheap exact passes first (filename, content, entities), then dense top-K — not dense-only.
+- Optional: in-memory cache warm indicator so first search isn't slow/cold.
 
 ---
 
-## Problem 3: Indexing Must Run in Background (ARCHITECTURE)
+## Problem 3 — Filename match missed (e.g. `NDA- Quantoo .pdf`)
 
-### What's happening
-
-Indexing runs in a `lifecycleScope` coroutine tied to `MainActivity`. When the user switches apps or locks the phone, the Activity is stopped and indexing pauses/dies. For large file systems (5000+ files) this means indexing never completes.
-
-### What needs to be done
-
-**3a. Create IndexingWorker using WorkManager**
-
-WorkManager is Android's official solution for deferrable background work that must complete even if the app is closed. It handles:
-
-- App process death and restart
-- Doze mode and battery optimization
-- Progress reporting back to UI
-- Retry on failure
-
-```kotlin
-// Add to app/build.gradle:
-implementation 'androidx.work:work-runtime-ktx:2.9.0'
-
-class IndexingWorker(
-    context: Context,
-    params: WorkerParameters
-) : CoroutineWorker(context, params) {
-
-    override suspend fun doWork(): Result {
-        val engine = (applicationContext as StriderApp).engine
-        val indexer = (applicationContext as StriderApp).indexer
-
-        // Report progress to UI via setProgress()
-        setProgress(workDataOf("status" to "Starting indexer..."))
-
-        indexer.indexDirectory(
-            rootPath = Environment.getExternalStorageDirectory().absolutePath,
-            onProgress = { msg ->
-                setProgress(workDataOf("status" to msg, "count" to indexer.size))
-            },
-            onFileIndexed = { count ->
-                setProgress(workDataOf("count" to count))
-            }
-        )
-
-        // Persist index to disk when done
-        indexer.saveIndex()
-
-        return Result.success()
-    }
-}
-
+### Symptom (debug example)
+```
+Dense rank: 6272 / top-350 cutoff (0.500)
+In FTS/candidate pool: NO
+Lexical rank: not scored
+Verdict: semantic match exists but outside top-350
 ```
 
-**3b. Enqueue indexing work from StriderApp**
+### Root cause
+- File not in FTS/recency pool (WhatsApp path, 24k competition).
+- Semantic rank weak; filename not in query embedding strongly.
+- Query `"nda quantoo"` should be filename-driven, not semantic.
 
-```kotlin
-// In StriderApp, after engine is ready:
-fun startBackgroundIndexing() {
-    val request = OneTimeWorkRequestBuilder<IndexingWorker>()
-        .setConstraints(
-            Constraints.Builder()
-                .setRequiresBatteryNotLow(true) // Don't drain battery
-                .build()
-        )
-        .build()
+### Already implemented
+- `FilenameSearch.kt` + `DatabaseHelper.searchPathsByNameTokens()` — full-library SQL on `COL_NAME` / `COL_PATH`.
+- `DiskSearch` — filename hits pinned, not dropped by pool cap.
+- `SearchPipeline.buildRerankPaths()` — filename paths prepended.
+- `GraniteReranker` — boost when all query tokens appear in filename.
 
-    WorkManager.getInstance(this)
-        .enqueueUniqueWork(
-            "file_indexing",
-            ExistingWorkPolicy.KEEP, // Don't restart if already running
-            request
-        )
-}
-
-```
-
-**3c. Show a persistent notification during indexing**
-
-Users need to know indexing is happening. WorkManager supports foreground service mode for long-running tasks:
-
-```kotlin
-// In IndexingWorker.doWork():
-setForeground(
-    ForegroundInfo(
-        NOTIFICATION_ID,
-        buildNotification("Strider Quanto: Indexing files...", count)
-    )
-)
-
-```
-
-Notification should show:
-
-- "Indexing files... (342 / ~1000)"
-- Small progress indicator
-- Tap to open app
-
-**3d. Observe work progress in MainActivity**
-
-```kotlin
-// In MainActivity, observe live progress:
-WorkManager.getInstance(this)
-    .getWorkInfosForUniqueWorkLiveData("file_indexing")
-    .observe(this) { workInfos ->
-        val info = workInfos.firstOrNull() ?: return@observe
-        val status = info.progress.getString("status") ?: return@observe
-        val count = info.progress.getInt("count", 0)
-        binding.tvStatus.text = status
-        binding.tvIndexCount.text = "$count files indexed"
-
-        if (info.state == WorkInfo.State.SUCCEEDED) {
-            binding.tvStatus.text = "✓ Index complete"
-        }
-    }
-
-```
-
-**3e. Trigger re-indexing smartly** Don't re-index every app open. Use these triggers instead:
-
-- First install: index immediately
-- Every 24 hours: check for changed files only (incremental)
-- User explicitly taps "Re-index": full re-index
-
-```kotlin
-val periodicRequest = PeriodicWorkRequestBuilder<IndexingWorker>(
-    24, TimeUnit.HOURS
-).build()
-
-WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-    "periodic_indexing",
-    ExistingPeriodicWorkPolicy.KEEP,
-    periodicRequest
-)
-
-```
-
-**3f. Persist index to disk so it survives app restarts**
-
-```kotlin
-// FileIndexer additions:
-fun saveIndex() {
-    val file = File(context.filesDir, "search_index.bin")
-    ObjectOutputStream(file.outputStream()).use { it.writeObject(index) }
-}
-
-fun loadIndex(): Boolean {
-    val file = File(context.filesDir, "search_index.bin")
-    if (!file.exists()) return false
-    return try {
-        val loaded = ObjectInputStream(file.inputStream()).use {
-            it.readObject() as MutableList<IndexEntry>
-        }
-        index.clear()
-        index.addAll(loaded)
-        true
-    } catch (e: Exception) { false }
-}
-
-```
-
-### Expected result
-
-- User taps "Index Files" → background work starts → user can close app
-- Notification shows live progress: "Indexing... 342 files"
-- App re-opened: shows current index count, search works immediately
-- Phone locked overnight: indexing completes by morning
-- Next day: only new/changed files re-indexed (seconds, not minutes)
+### Verify / finish
+- Re-index not required for filename SQL (reads live DB).
+- Test: search `nda quantoo` → pool ✓, lexical #1, shown #1.
+- Debug field tracks **filename**, search bar uses **natural query tokens**.
 
 ---
 
-## Implementation Order
+## Problem 4 — Person names in PDF content not findable (`Tanuj`, `Nikharv`)
 
-Do these in sequence — each builds on the previous:
+### Symptom
+Names appear in `NDA- Quantoo .pdf` body but search `Tanuj` or `Nikharv` → dense rank ~**1500**, not in UI.
 
-```
-Step 1: Problem 1 fixes (Application class + filesDir + no close on destroy)
-        → Verify: reopen app 5 times, model loads instantly after first open
+### Root cause (multi-layer)
 
-Step 2: Problem 3a + 3f (WorkManager + disk persistence)
-        → Verify: start indexing, close app, reopen, index continues/completes
+| Layer | Issue |
+|--------|--------|
+| **Name extraction** | `OwnerExtraction.extractNamesFromText()` only matches **labeled** fields (`Name:`, `S/o`, etc.). Party names in NDA body text are **not** extracted. |
+| **Content truncation** | PDF: first **3 pages**, **800 chars** raw → `cleanToKeywords()` → **60 distinct words** (`ContentExtractor.kt`). Names on page 4+ or dropped by `distinct()`/`STOPWORDS` never indexed. |
+| **Embedding** | `metadataString` capped **400 chars**, **96 tokens**. Query `"Tanuj"` vs NDA-heavy embedding → weak cosine (~0.5), rank ~1500 among 24k. |
+| **Retrieval** | No **content keyword SQL pass** (unlike filename pass). Relies on FTS + semantic; FTS may hit but lexical pool/ranking loses; semantic rank too low for top-350. |
+| **Query type** | Person-name queries need **keyword/entity retrieval**, not bi-encoder semantic rank. |
 
-Step 3: Problem 2a + 2b (batched inference + short seq len)
-        → Benchmark: time 100 files before and after, confirm 5x+ speedup
+### Solution (implement in order)
 
-Step 4: Problem 2d + 3c (priority dirs + notification)
-        → Verify: Documents/Downloads indexed within 30 seconds of starting
+#### 4a. Content token search (mirror `FilenameSearch`) — **high priority**
+- Add `DatabaseHelper.searchPathsByContentTokens(tokens)` — `LIKE` on `COL_CONTENT_SNIP`, `COL_METADATA_STR`, optionally FTS `keywords`.
+- New `ContentSearch.gatherPaths(db, query)` — same token rules as filename.
+- Inject into `DiskSearch` + `SearchPipeline.buildRerankPaths()` like filename hits.
+- **Acceptance:** `Tanuj` → file in pool, lexical hit on content, top 10 without relying on dense rank.
 
-Step 5: Problem 2c + 3e (incremental indexing + periodic work)
-        → Verify: second index run takes <10 seconds for unchanged files
+#### 4b. Extract and index party/person names from PDF text — **high priority**
+- Extend `OwnerExtraction` or new `EntityExtraction.kt`:
+  - Parse **raw PDF text** (not only labeled lines): capitalized tokens, "between X and Y", signature blocks, "Party A/B", email-local-part patterns.
+  - Store in new column e.g. `COL_ENTITIES` or append to FTS keywords explicitly.
+- `buildKeywordString()` must include **all** extracted person/org names (not only `ownerEntities` capped at 4).
+- Re-index affected files (or full re-index once).
 
-```
+#### 4c. Person-name query routing — **medium priority**
+- In `QueryEnricher`: if query is 1–2 tokens, looks like a name (`isNameLike`), set flag `queryType = PERSON_NAME`.
+- When `PERSON_NAME`: skip dense cutoff reliance; weight lexical/content/entity match heavily in `GraniteReranker` (similar to filename boost).
+
+#### 4d. Richer PDF indexing (longer term)
+- Increase `MAX_CHARS` for PDF **entity extraction** path (separate from embed snippet).
+- Multi-chunk embed: title + page1 + pages with detected names; store multiple vectors or merge best chunk at search time.
+- Optional: second FTS field `entities` for names only.
+
+### Acceptance
+- Search `Tanuj` and `Nikharv` → `NDA- Quantoo .pdf` in **top 3** (typing and Search).
+- Debug: `pool ✓`, `lexical #1–5` or `content match`, dense rank may still be ~1500 — **that's OK** if keyword path wins.
 
 ---
 
-## Files To Modify
+## Problem 5 — Early-indexed files disappear after full index
 
+### Symptom
+Files indexed early visible when library small; gone at 24k.
 
-| File                  | Changes                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------- |
-| `StriderApp.kt`       | CREATE — Application subclass, owns engine + indexer lifecycle                                    |
-| `AndroidManifest.xml` | Add `android:name=".StriderApp"`, add WorkManager foreground service permission                   |
-| `EmbeddingEngine.kt`  | Add `embedBatch()`, change `cacheDir` → `filesDir`, remove close-on-destroy pattern               |
-| `FileIndexer.kt`      | Add `saveIndex()`, `loadIndex()`, `IndexEntry` with hash, priority dir ordering, batch processing |
-| `IndexingWorker.kt`   | CREATE — WorkManager CoroutineWorker, foreground notification, progress reporting                 |
-| `MainActivity.kt`     | Remove engine init, observe WorkManager progress, load persisted index on start                   |
-| `app/build.gradle`    | Add `work-runtime-ktx:2.9.0` dependency                                                           |
+### Root cause
+Not bad embeddings — **recall caps** and recency bias excluded old files from lexical pool; dense top-K cut them.
 
+### Already implemented
+- Full-library dense scan.
+- Filename search.
+- Reduced recent-file flooding.
+
+### Remaining
+- Old files with **no filename/content token overlap** still depend on dense rank vs top-350.
 
 ---
 
-## Dependencies To Add to app/build.gradle
+## Problem 6 — Semantic score clustering at scale
 
-```gradle
-// WorkManager — background indexing
-implementation 'androidx.work:work-runtime-ktx:2.9.0'
+### Symptom
+Many files at cosine ~0.45–0.55; correct file at rank 500–6000.
 
-// Startup — initialize engine before first activity
-implementation 'androidx.startup:startup-runtime:1.1.1'
+### Root cause
+- Single 384-dim vector per file from short generic metadata.
+- 24k media/docs share similar phrases ("pdf document in WhatsApp folder…").
 
-```
+### Solution
+- **Don't** fix by top-K → 6000.
+- Fix by **exact passes** (filename, content, entities) + reranker.
+- Long term: PDF chunks, better metadata, optional cross-encoder reranker (separate model).
 
-## Permissions To Add to AndroidManifest.xml
+---
 
-```xml
-<!-- WorkManager foreground service for background indexing -->
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+## Problem 7 — FTS / indexing limits
 
-<!-- WorkManager service declaration -->
-<service
-    android:name="androidx.work.impl.foreground.SystemForegroundService"
-    android:foregroundServiceType="dataSync"
-    android:exported="false" />
+### Symptom
+Keywords exist but file not in candidate pool.
 
-```
+### Root cause
+- FTS result limits (~600–2500) at 24k.
+- Deferred FTS backfill on startup (`StriderApp` — search ready before backfill completes).
+- `cleanToKeywords()` — `distinct().take(60)` drops repeated/significant terms.
 
+### Solution
+- Full-library SQL passes bypass FTS caps (filename ✅, **content/entities ❌**).
+- Block search or show "indexing keywords…" until FTS backfill done, OR run backfill synchronously for small batches.
+- For names: store in dedicated column, always searchable via SQL.
+
+---
+
+## Problem 8 — Weak signals for photos / media
+
+### Symptom
+`IMG_2847.jpg` only findable by date/folder, not scene/content.
+
+### Root cause
+No OCR; embed EXIF + folder only.
+
+### Solution (out of scope unless requested)
+- OCR pipeline, or exclude DCIM from full index / separate "Documents only" mode.
+
+---
+
+## Problem 9 — Debug tooling (keep)
+
+### Current
+- `etDebugTarget` (when `HYBRID_DEV_MODE = true`).
+- Status line summary; tap for full report; logcat tag `SearchDebug`.
+- Result badges: `d#N l#N`.
+
+### For next thread
+Use debug on failing cases before tuning. Turn off before release.
+
+---
+
+## Recommended implementation order (next thread)
+
+| Priority | Task | Status |
+|----------|------|--------|
+| **P0** | Unify typing + Search → same `SearchPipeline`, semantic on | Done — `MainActivity.performSearch()` |
+| **P0** | Content token SQL search (`Tanuj`, `Nikharv`) | Done — `ContentSearch.kt`, `DatabaseHelper.searchPathsByContentTokens` |
+| **P0** | Dual-channel index: entities + context keywords | Done — `EntityExtraction.kt`, `COL_ENTITIES` (DB v4), re-index on upgrade |
+| **P1** | Person-name query routing + reranker boost | Done — `QueryType.PERSON_NAME`, `GraniteReranker`, `LexicalSearch` |
+| **P1** | Verify filename search for `nda quantoo` on device | **Manual QA** — see test matrix below |
+| **P2** | PDF multi-chunk or longer entity extraction text | `ContentExtractor`, `FileMetadata` |
+| **P2** | FTS backfill / warm cache UX | `StriderApp`, `MainActivity` |
+| **P3** | OCR / docs-only indexing mode | product decision |
+
+---
+
+## Test matrix (hand to QA / next agent)
+
+| Query | Expected file | Must pass typing + Search |
+|-------|---------------|---------------------------|
+| `nda quantoo` | `NDA- Quantoo .pdf` | Top 1 (filename) |
+| `Tanuj` | `NDA- Quantoo .pdf` | Top 3 (content/entity) |
+| `Nikharv` | `NDA- Quantoo .pdf` | Top 3 (content/entity) |
+| Early-indexed doc (old path) | (your sample) | Top 10 |
+| Vague semantic query | relevant doc | Top 5 |
+
+Use debug report fields: `pool`, `dense rank`, `lexical rank`, `shown rank`.
+
+---
+
+## Explicit non-goals (don't waste time)
+
+- Raising dense top-K above ~350–400 for 24k as primary fix.
+- Swapping embedding model without eval set.
+- Maintaining two long-term search algorithms (typing vs Search).
+- ANN/HNSW until RAM scan proven too slow after cache warm.
+
+---
+
+**Start with P0: unified typing/search + content token search + PDF name extraction** — that covers filename cases, person-name cases, and the UX gap in one pass.

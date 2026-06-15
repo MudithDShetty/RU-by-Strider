@@ -9,7 +9,7 @@ import java.nio.ByteBuffer
 
 private const val TAG = "DatabaseHelper"
 private const val DB_NAME = "ru_index.db"
-private const val DB_VERSION = 3
+private const val DB_VERSION = 4
 private const val FTS_TABLE = "fts_index"
 
 private enum class FtsMode { FTS5, FTS4, NONE }
@@ -17,6 +17,7 @@ private enum class FtsMode { FTS5, FTS4, NONE }
 class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
 
     private var ftsMode = FtsMode.NONE
+    private val embeddingIndex = EmbeddingIndex()
 
     companion object {
         const val TABLE = "indexed_files"
@@ -36,6 +37,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         const val COL_INDEXED_AT    = "indexed_at"
         const val COL_OWNER_NAMES   = "owner_names"
         const val COL_OWNER_CONF    = "owner_confidence"
+        const val COL_ENTITIES      = "entities"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -56,7 +58,8 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             "$COL_EMBEDDING BLOB NOT NULL, " +
             "$COL_INDEXED_AT INTEGER NOT NULL, " +
             "$COL_OWNER_NAMES TEXT, " +
-            "$COL_OWNER_CONF REAL NOT NULL DEFAULT 0)"
+            "$COL_OWNER_CONF REAL NOT NULL DEFAULT 0, " +
+            "$COL_ENTITIES TEXT)"
         )
 
         db.execSQL("CREATE INDEX idx_path ON $TABLE ($COL_PATH)")
@@ -78,6 +81,11 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_OWNER_CONF REAL NOT NULL DEFAULT 0")
             db.execSQL("UPDATE $TABLE SET $COL_LAST_MODIFIED = 0")
             Log.d(TAG, "DB upgraded to v3: owner_names added, all files queued for re-index")
+        }
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_ENTITIES TEXT")
+            db.execSQL("UPDATE $TABLE SET $COL_LAST_MODIFIED = 0")
+            Log.d(TAG, "DB upgraded to v4: entities column added, all files queued for re-index")
         }
     }
 
@@ -136,8 +144,21 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             put(COL_INDEXED_AT,    System.currentTimeMillis())
             put(COL_OWNER_NAMES,   OwnerMatcher.serializeEntities(file.metadata.ownerEntities))
             put(COL_OWNER_CONF,    file.metadata.ownerConfidence)
+            put(COL_ENTITIES,      serializeEntities(file.metadata.extractedEntities))
         }
         db.insertWithOnConflict(TABLE, null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+        embeddingIndex.upsert(file.path, file.embedding)
+    }
+
+    /** Load all embeddings into RAM for fast dense scan (~1.5 KB per file). */
+    fun warmEmbeddingCache() {
+        embeddingIndex.loadFrom(this)
+    }
+
+    fun isEmbeddingCacheWarm(): Boolean = embeddingIndex.isWarm
+
+    fun invalidateEmbeddingCache() {
+        embeddingIndex.clear()
     }
 
     fun ftsInsert(path: String, keywords: String) {
@@ -263,6 +284,99 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         return paths
     }
 
+    /**
+     * Full-library filename search — every token must appear in [COL_NAME] (case-insensitive).
+     * Not capped by FTS/recency pools; fixes misses like "NDA- Quantoo .pdf" at 24k+ files.
+     */
+    fun searchPathsByNameTokens(tokens: List<String>, limit: Int = 80): List<String> {
+        val usable = tokens.map { it.lowercase().trim() }.filter { it.length >= 2 }.distinct()
+        if (usable.isEmpty()) return emptyList()
+
+        val db = readableDatabase
+        val paths = mutableListOf<String>()
+        val nameClauses = usable.map { "LOWER($COL_NAME) LIKE ?" }
+        val nameArgs = usable.map { "%$it%" }.toMutableList()
+
+        fun runQuery(where: String, args: Array<String>): Int {
+            var added = 0
+            val cursor = db.query(
+                TABLE,
+                arrayOf(COL_PATH),
+                where,
+                args,
+                null, null,
+                "$COL_LAST_MODIFIED DESC",
+                limit.toString()
+            )
+            cursor.use {
+                while (it.moveToNext() && paths.size < limit) {
+                    val path = it.getString(0)
+                    if (path !in paths) {
+                        paths.add(path)
+                        added++
+                    }
+                }
+            }
+            return added
+        }
+
+        runQuery(nameClauses.joinToString(" AND "), nameArgs.toTypedArray())
+
+        if (paths.size < limit) {
+            val pathClauses = usable.map { "LOWER($COL_PATH) LIKE ?" }
+            val pathArgs = usable.map { "%$it%" }.toTypedArray()
+            runQuery(pathClauses.joinToString(" AND "), pathArgs)
+        }
+
+        Log.d(TAG, "Filename token search (${usable.joinToString()}): ${paths.size} hits")
+        return paths
+    }
+
+    /**
+     * Full-library content/entity search — every token must appear in snippet, metadata, or entities.
+     * Bypasses FTS/recency pools for person-name and content-keyword queries at 24k+ files.
+     */
+    fun searchPathsByContentTokens(tokens: List<String>, limit: Int = 80): List<String> {
+        val usable = tokens.map { it.lowercase().trim() }.filter { it.length >= 2 }.distinct()
+        if (usable.isEmpty()) return emptyList()
+
+        val db = readableDatabase
+        val paths = mutableListOf<String>()
+        val clauses = usable.map { token ->
+            "(LOWER($COL_CONTENT_SNIP) LIKE ? OR LOWER($COL_METADATA_STR) LIKE ? OR LOWER($COL_ENTITIES) LIKE ?)"
+        }
+        val args = usable.flatMap { token ->
+            val pattern = "%$token%"
+            listOf(pattern, pattern, pattern)
+        }.toTypedArray()
+
+        val cursor = db.query(
+            TABLE,
+            arrayOf(COL_PATH),
+            clauses.joinToString(" AND "),
+            args,
+            null, null,
+            "$COL_LAST_MODIFIED DESC",
+            limit.toString()
+        )
+        cursor.use {
+            while (it.moveToNext() && paths.size < limit) {
+                paths.add(it.getString(0))
+            }
+        }
+
+        Log.d(TAG, "Content token search (${usable.joinToString()}): ${paths.size} hits")
+        return paths
+    }
+
+    fun serializeEntities(entities: List<String>): String? {
+        val normalized = entities.map { it.lowercase().trim() }.filter { it.length >= 2 }.distinct()
+        return normalized.joinToString(" ").ifBlank { null }
+    }
+
+    fun deserializeEntities(raw: String?): List<String> =
+        raw?.split(Regex("\\s+"))?.filter { it.length >= 2 } ?: emptyList()
+
     fun loadPathsByCategories(categories: List<Category>, limit: Int): List<String> {
         if (categories.isEmpty()) return emptyList()
         val db = readableDatabase
@@ -309,7 +423,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
                     COL_PATH, COL_NAME, COL_EXT, COL_SIZE, COL_LAST_MODIFIED,
                     COL_CATEGORIES, COL_AGE_BUCKET, COL_SIZE_BUCKET,
                     COL_TYPE_LABEL, COL_CONTENT_SNIP, COL_METADATA_STR,
-                    COL_OWNER_NAMES, COL_OWNER_CONF
+                    COL_OWNER_NAMES, COL_OWNER_CONF, COL_ENTITIES
                 ),
                 "$COL_PATH IN ($placeholders)",
                 chunk.toTypedArray(),
@@ -337,16 +451,22 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
                 if (it.columnCount > 11) it.getString(11) else null
             )
             val ownerConfidence = if (it.columnCount > 12) it.getFloat(12) else 0f
+            val extractedEntities = if (it.columnCount > 13) {
+                deserializeEntities(it.getString(13))
+            } else {
+                emptyList()
+            }
 
             val metadata = FileMetadata(
-                metadataString  = it.getString(10),
-                categories      = cats,
-                contentSnippet  = it.getString(9),
-                ageBucket       = it.getString(6),
-                sizeBucket      = it.getString(7),
-                typeLabel       = it.getString(8),
-                ownerEntities   = ownerEntities,
-                ownerConfidence = ownerConfidence
+                metadataString    = it.getString(10),
+                categories        = cats,
+                contentSnippet    = it.getString(9),
+                ageBucket         = it.getString(6),
+                sizeBucket        = it.getString(7),
+                typeLabel         = it.getString(8),
+                ownerEntities     = ownerEntities,
+                ownerConfidence   = ownerConfidence,
+                extractedEntities = extractedEntities
             )
 
             IndexedFileStub(
@@ -364,16 +484,55 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         }
     }
 
-    fun scanAllEmbeddingsTopK(queryEmb: FloatArray, topK: Int = 50): List<Pair<String, Float>> {
-        if (queryEmb.size != EmbeddingEngine.EMBEDDING_DIM) return emptyList()
+    fun scanAllEmbeddingsTopK(queryEmb: FloatArray, topK: Int = 50): List<Pair<String, Float>> =
+        scanAllEmbeddings(queryEmb, topK).top
+
+    /**
+     * Full-library dense scan with optional rank tracking for debug/diagnostics.
+     * [trackNameHints] are matched case-insensitively against path and filename.
+     */
+    fun scanAllEmbeddings(
+        queryEmb: FloatArray,
+        topK: Int = 50,
+        trackNameHints: List<String> = emptyList()
+    ): DenseScanResult {
+        if (queryEmb.size != EmbeddingEngine.EMBEDDING_DIM) {
+            return DenseScanResult(emptyList(), emptyList(), 0)
+        }
+        if (embeddingIndex.isWarm) {
+            val cached = embeddingIndex.scan(queryEmb, topK, trackNameHints)
+            if (cached.totalScanned > 0) {
+                Log.d(TAG, "Dense scan (RAM cache): ${cached.totalScanned} files → top $topK")
+                return cached
+            }
+        }
+        return scanAllEmbeddingsFromDisk(queryEmb, topK, trackNameHints)
+    }
+
+    private fun scanAllEmbeddingsFromDisk(
+        queryEmb: FloatArray,
+        topK: Int,
+        trackNameHints: List<String>
+    ): DenseScanResult {
+        val hints = trackNameHints.map { it.lowercase().trim() }.filter { it.isNotEmpty() }
         val db = readableDatabase
         val top = ArrayList<Pair<String, Float>>(topK)
+        val trackedScores = linkedMapOf<String, Float>()
+        val higherCounts = linkedMapOf<String, Int>()
+
+        fun pathMatchesHint(path: String): Boolean {
+            if (hints.isEmpty()) return false
+            val lowerPath = path.lowercase()
+            val name = path.substringAfterLast('/').lowercase()
+            return hints.any { h -> h in lowerPath || h in name || name.contains(h) }
+        }
+
+        var scanned = 0
         val cursor = db.query(
             TABLE,
             arrayOf(COL_PATH, COL_EMBEDDING),
             null, null, null, null, null
         )
-        var scanned = 0
         cursor.use {
             while (it.moveToNext()) {
                 scanned++
@@ -381,11 +540,32 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
                 val emb = blobToFloatArray(it.getBlob(1))
                 var dot = 0f
                 for (i in queryEmb.indices) dot += queryEmb[i] * emb[i]
-                insertTopKByScore(top, path, dot.coerceIn(-1f, 1f), topK)
+                dot = dot.coerceIn(-1f, 1f)
+
+                if (pathMatchesHint(path)) {
+                    trackedScores[path] = dot
+                    higherCounts.putIfAbsent(path, 0)
+                }
+                for ((tp, ts) in trackedScores) {
+                    if (dot > ts) higherCounts[tp] = (higherCounts[tp] ?: 0) + 1
+                }
+
+                insertTopKByScore(top, path, dot, topK)
             }
         }
-        Log.d(TAG, "Full-library dense scan: $scanned files → top $topK")
-        return top.sortedByDescending { it.second }
+
+        val tracked = trackedScores.map { (path, score) ->
+            val rank = (higherCounts[path] ?: 0) + 1
+            DenseScanResult.TrackedRank(
+                path = path,
+                rank = rank,
+                score = score,
+                inTopK = top.any { it.first == path }
+            )
+        }.sortedBy { it.rank }
+
+        Log.d(TAG, "Full-library dense scan: $scanned files → top $topK, tracked ${tracked.size}")
+        return DenseScanResult(top.sortedByDescending { it.second }, tracked, scanned)
     }
 
     private fun insertTopKByScore(
@@ -451,6 +631,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         val placeholders = paths.joinToString(",") { "?" }
         val deleted = db.delete(TABLE, "$COL_PATH IN ($placeholders)", paths.toTypedArray())
         ftsDeletePaths(paths)
+        embeddingIndex.remove(paths)
         Log.d(TAG, "Deleted $deleted stale records from DB")
     }
 

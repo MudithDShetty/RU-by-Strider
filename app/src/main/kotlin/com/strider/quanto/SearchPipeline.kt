@@ -3,14 +3,6 @@ package com.strider.quanto
 import android.util.Log
 
 private const val TAG = "SearchPipeline"
-private const val RRF_K = 60
-private const val BM25_RRF_WEIGHT = 2f
-
-/** Reranked score below this triggers a full-library dense rescan. */
-private const val LOW_CONFIDENCE_SCORE = 0.22f
-
-/** Weak lexical-only top hit — triggers expanded pool (typing preview). */
-private const val WEAK_LEXICAL_SCORE = 12f
 
 /**
  * Hybrid retrieval pipeline (BEIR / RAG standard):
@@ -22,13 +14,29 @@ private const val WEAK_LEXICAL_SCORE = 12f
  */
 object SearchPipeline {
 
+    data class SearchOutcome(
+        val results: List<SearchResult>,
+        val diagnostics: SearchDiagnostics?
+    )
+
     fun search(
         enrichedQuery: EnrichedQuery,
         engine: EmbeddingEngine,
         db: DatabaseHelper,
         topK: Int = 10,
         semanticEnabled: Boolean = true
-    ): List<SearchResult> {
+    ): List<SearchResult> = searchWithDiagnostics(
+        enrichedQuery, engine, db, topK, semanticEnabled
+    ).results
+
+    fun searchWithDiagnostics(
+        enrichedQuery: EnrichedQuery,
+        engine: EmbeddingEngine,
+        db: DatabaseHelper,
+        topK: Int = 10,
+        semanticEnabled: Boolean = true,
+        trackHint: String? = null
+    ): SearchOutcome {
         val primary = runSearchPass(
             enrichedQuery = enrichedQuery,
             engine          = engine,
@@ -36,39 +44,35 @@ object SearchPipeline {
             topK            = topK,
             semanticEnabled = semanticEnabled,
             expanded        = false,
-            denseOverride   = null
+            denseOverride   = null,
+            trackHint       = trackHint
         )
 
-        if (!needsFallback(primary, semanticEnabled, db)) {
-            return primary.results
-        }
-
-        Log.i(TAG, "Recall fallback triggered (${primary.reason}) — rescanning full library")
-
-        val denseOverride = if (semanticEnabled) {
-            engine.prepareForSearch()
-            val queryEmb = engine.embed(enrichedQuery.cleanQueryForEmbedding)
-            db.scanAllEmbeddingsTopK(queryEmb, topK = 50)
+        val outcome = if (!needsFallback(primary, semanticEnabled, db)) {
+            primary
         } else {
-            null
+            Log.i(TAG, "Recall fallback triggered (${primary.reason}) — expanding lexical pool")
+
+            val fallback = runSearchPass(
+                enrichedQuery = enrichedQuery,
+                engine          = engine,
+                db              = db,
+                topK            = topK,
+                semanticEnabled = semanticEnabled,
+                expanded        = true,
+                denseOverride   = null,
+                trackHint       = trackHint
+            )
+
+            if (isBetterResult(fallback, primary)) {
+                Log.i(TAG, "Fallback improved results (top ${fallback.results.firstOrNull()?.score ?: 0f})")
+                fallback
+            } else {
+                primary
+            }
         }
 
-        val fallback = runSearchPass(
-            enrichedQuery = enrichedQuery,
-            engine          = engine,
-            db              = db,
-            topK            = topK,
-            semanticEnabled = semanticEnabled,
-            expanded        = true,
-            denseOverride   = denseOverride
-        )
-
-        return if (isBetterResult(fallback, primary)) {
-            Log.i(TAG, "Fallback improved results (top ${fallback.results.firstOrNull()?.score ?: 0f})")
-            fallback.results
-        } else {
-            primary.results
-        }
+        return SearchOutcome(outcome.results, outcome.diagnostics)
     }
 
     private data class SearchPassResult(
@@ -77,7 +81,14 @@ object SearchPipeline {
         val lexicalCount: Int,
         val lexicalTopRaw: Float,
         val denseTop: Float,
-        val reason: String = ""
+        val reason: String = "",
+        val diagnostics: SearchDiagnostics? = null
+    )
+
+    private data class DenseRetrieveResult(
+        val scored: List<Pair<String, Float>>,
+        val scan: DenseScanResult,
+        val denseTopK: Int
     )
 
     private fun runSearchPass(
@@ -87,8 +98,12 @@ object SearchPipeline {
         topK: Int,
         semanticEnabled: Boolean,
         expanded: Boolean,
-        denseOverride: List<Pair<String, Float>>?
+        denseOverride: List<Pair<String, Float>>?,
+        trackHint: String? = null
     ): SearchPassResult {
+        val totalCount = db.getTotalCount()
+        val filenamePaths = FilenameSearch.gatherPaths(db, enrichedQuery)
+        val contentPaths = ContentSearch.gatherPaths(db, enrichedQuery)
         val candidatePaths = if (expanded) {
             DiskSearch.gatherExpandedCandidatePaths(db, enrichedQuery)
         } else {
@@ -107,19 +122,28 @@ object SearchPipeline {
         val stubMap = stubs.associateBy { it.path }
 
         val lexicalHits = if (stubs.isNotEmpty()) {
-            LexicalSearch.search(stubs, enrichedQuery, limit = 50)
+            LexicalSearch.search(
+                stubs, enrichedQuery,
+                limit = RetrievalScaling.lexicalSearchLimit(totalCount)
+            )
         } else {
             emptyList()
         }
         val lexicalMap = lexicalHits.associate { it.stub.path to it.score }
 
-        val denseScored: List<Pair<String, Float>> = when {
-            denseOverride != null -> denseOverride
-            semanticEnabled -> denseRetrieve(
-                enrichedQuery, lexicalHits, engine, db, limit = 50, expanded = expanded
+        val denseResult: DenseRetrieveResult? = when {
+            denseOverride != null -> DenseRetrieveResult(
+                scored = denseOverride,
+                scan = DenseScanResult(denseOverride, emptyList(), db.getTotalCount()),
+                denseTopK = denseOverride.size
             )
-            else -> emptyList()
+            semanticEnabled -> denseRetrieve(
+                enrichedQuery, lexicalHits, engine, db,
+                totalCount = totalCount, trackHint = trackHint
+            )
+            else -> null
         }
+        val denseScored = denseResult?.scored ?: emptyList()
 
         val loadEmbeddings: (List<String>) -> Map<String, FloatArray> =
             { paths -> db.loadEmbeddingsForPaths(paths) }
@@ -146,11 +170,17 @@ object SearchPipeline {
                 lexicalCount = lexicalHits.size,
                 lexicalTopRaw = lexicalTopRaw,
                 denseTop = 0f,
-                reason = if (expanded) "expanded lexical" else "lexical only"
+                reason = if (expanded) "expanded lexical" else "lexical only",
+                diagnostics = buildDiagnostics(
+                    trackHint, enrichedQuery.cleanQueryForEmbedding, db, candidatePaths, lexicalHits, null,
+                    emptyList(), results, semanticEnabled = false, denseTopK = 0
+                )
             )
         }
 
-        val fusedPaths = rrfFuse(lexicalHits, denseScored, topK = 25)
+        val fusedPaths = buildRerankPaths(
+            lexicalHits, denseScored, totalCount, filenamePaths, contentPaths
+        )
         val fusionStubs = db.loadStubsForPaths(fusedPaths)
         val fusionStubMap = fusionStubs.associateBy { it.path }
         val embeddings = loadEmbeddings(fusedPaths)
@@ -180,21 +210,30 @@ object SearchPipeline {
                 lexicalCount = lexicalHits.size,
                 lexicalTopRaw = lexicalTopRaw,
                 denseTop = denseScored.firstOrNull()?.second ?: 0f,
-                reason = "candidates empty"
+                reason = "candidates empty",
+                diagnostics = buildDiagnostics(
+                    trackHint, enrichedQuery.cleanQueryForEmbedding, db, candidatePaths, lexicalHits, denseResult?.scan,
+                    fusedPaths, results, semanticEnabled = true,
+                    denseTopK = denseResult?.denseTopK ?: 0
+                )
             )
         }
 
         val lexicalRankMap = lexicalHits.mapIndexed { rank, hit -> hit.stub.path to rank }.toMap()
         val denseRankMap = denseScored.mapIndexed { rank, (path, _) -> path to rank }.toMap()
 
-        val results = GraniteReranker.rerank(
-            query          = enrichedQuery,
-            candidates     = candidates,
-            lexicalScores  = lexicalMap,
-            lexicalRankMap = lexicalRankMap,
-            denseRankMap   = denseRankMap,
-            engine         = engine
-        ).take(topK)
+        val results = GraniteReranker.takeTop(
+            GraniteReranker.rerank(
+                query          = enrichedQuery,
+                candidates     = candidates,
+                lexicalScores  = lexicalMap,
+                lexicalRankMap = lexicalRankMap,
+                denseRankMap   = denseRankMap,
+                engine         = engine
+            ),
+            query = enrichedQuery,
+            topK  = topK
+        )
 
         return SearchPassResult(
             results = results,
@@ -202,9 +241,38 @@ object SearchPipeline {
             lexicalCount = lexicalHits.size,
             lexicalTopRaw = lexicalTopRaw,
             denseTop = denseScored.firstOrNull()?.second ?: 0f,
-            reason = if (expanded) "expanded hybrid" else "hybrid"
+            reason = if (expanded) "expanded hybrid" else "hybrid",
+            diagnostics = buildDiagnostics(
+                trackHint, enrichedQuery.cleanQueryForEmbedding, db, candidatePaths, lexicalHits, denseResult?.scan,
+                fusedPaths, results, semanticEnabled = true,
+                denseTopK = denseResult?.denseTopK ?: 0
+            )
         )
     }
+
+    private fun buildDiagnostics(
+        trackHint: String?,
+        query: String,
+        db: DatabaseHelper,
+        candidatePaths: List<String>,
+        lexicalHits: List<LexicalHit>,
+        denseScan: DenseScanResult?,
+        fusedPaths: List<String>,
+        results: List<SearchResult>,
+        semanticEnabled: Boolean,
+        denseTopK: Int
+    ): SearchDiagnostics? = SearchDiagnosticsBuilder.build(
+        hint = trackHint,
+        query = query,
+        totalIndexed = db.getTotalCount(),
+        candidatePaths = candidatePaths,
+        lexicalHits = lexicalHits,
+        denseScan = denseScan,
+        fusedPaths = fusedPaths,
+        results = results,
+        semanticEnabled = semanticEnabled,
+        denseTopK = denseTopK
+    )
 
     private fun needsFallback(
         pass: SearchPassResult,
@@ -216,11 +284,11 @@ object SearchPipeline {
         if (pass.results.isEmpty()) return true
 
         if (!semanticEnabled) {
-            return pass.lexicalCount == 0 || pass.lexicalTopRaw < WEAK_LEXICAL_SCORE
+            return pass.lexicalCount == 0 || pass.lexicalTopRaw < SearchWeights.WEAK_LEXICAL_SCORE
         }
 
-        if (pass.topScore < LOW_CONFIDENCE_SCORE) return true
-        if (pass.lexicalCount == 0 && pass.denseTop < 0.38f) return true
+        if (pass.topScore < SearchWeights.LOW_CONFIDENCE_SCORE) return true
+        if (pass.lexicalCount == 0 && pass.denseTop < SearchWeights.WEAK_DENSE_SCORE) return true
 
         return false
     }
@@ -228,8 +296,9 @@ object SearchPipeline {
     private fun isBetterResult(fallback: SearchPassResult, primary: SearchPassResult): Boolean {
         if (fallback.results.isEmpty()) return false
         if (primary.results.isEmpty()) return true
-        return fallback.topScore > primary.topScore + 0.03f ||
-            (primary.topScore < LOW_CONFIDENCE_SCORE && fallback.topScore >= primary.topScore)
+        return fallback.topScore > primary.topScore + SearchWeights.FALLBACK_SCORE_MARGIN ||
+            (primary.topScore < SearchWeights.LOW_CONFIDENCE_SCORE &&
+                fallback.topScore >= primary.topScore)
     }
 
     private fun denseRetrieve(
@@ -237,28 +306,63 @@ object SearchPipeline {
         lexicalHits: List<LexicalHit>,
         engine: EmbeddingEngine,
         db: DatabaseHelper,
-        limit: Int,
-        expanded: Boolean = false
-    ): List<Pair<String, Float>> {
+        totalCount: Int,
+        trackHint: String? = null
+    ): DenseRetrieveResult {
         engine.prepareForSearch()
         val queryEmb = engine.embed(query.cleanQueryForEmbedding)
+        val denseTopK = RetrievalScaling.denseTopK(totalCount)
 
-        val lexicalPaths = lexicalHits.map { it.stub.path }
-        val densePaths = DiskSearch.gatherDenseCandidatePaths(db, query, lexicalPaths, expanded)
-
-        Log.d(TAG, "Dense candidate pool: ${densePaths.size} files (expanded=$expanded)")
-
-        val embeddings = db.loadEmbeddingsForPaths(densePaths)
-        if (embeddings.isEmpty()) return emptyList()
-
-        return embeddings.map { (path, emb) ->
-            path to engine.cosineSimilarity(queryEmb, emb)
+        val hints = buildList {
+            trackHint?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
         }
-        .sortedByDescending { it.second }
-        .take(limit)
-        .also {
-            Log.d(TAG, "Granite dense: ${it.size} hits, top: ${it.firstOrNull()?.first?.substringAfterLast('/')}")
+        val scan = db.scanAllEmbeddings(queryEmb, topK = denseTopK, trackNameHints = hints)
+        val scored = scan.top.toMutableList()
+        val scoredPaths = scored.map { it.first }.toMutableSet()
+
+        val pinLexical = RetrievalScaling.denseLexicalPinCount(totalCount)
+        val pinPaths = lexicalHits.take(pinLexical).map { it.stub.path }.filter { it !in scoredPaths }
+        if (pinPaths.isNotEmpty()) {
+            db.loadEmbeddingsForPaths(pinPaths).forEach { (path, emb) ->
+                scored.add(path to engine.cosineSimilarity(queryEmb, emb))
+                scoredPaths.add(path)
+            }
+            scored.sortByDescending { it.second }
         }
+
+        val finalScored = scored.take(denseTopK)
+        Log.d(
+            TAG,
+            "Granite dense ($totalCount files, top-$denseTopK, cache=${db.isEmbeddingCacheWarm()}): " +
+                "${finalScored.size} hits, top: ${finalScored.firstOrNull()?.first?.substringAfterLast('/')}"
+        )
+        return DenseRetrieveResult(finalScored, scan, denseTopK)
+    }
+
+    private fun buildRerankPaths(
+        lexicalHits: List<LexicalHit>,
+        denseScored: List<Pair<String, Float>>,
+        totalCount: Int,
+        filenamePaths: List<String> = emptyList(),
+        contentPaths: List<String> = emptyList()
+    ): List<String> {
+        val fuseK = RetrievalScaling.rrfFusionTopK(totalCount)
+        val pinK = RetrievalScaling.densePinCount(totalCount)
+        val cap = RetrievalScaling.rerankPoolCap(totalCount)
+        val exactPinLimit = RetrievalScaling.exactMatchPinLimit(totalCount)
+        val lexicalPinLimit = RetrievalScaling.lexicalRerankPinLimit(totalCount)
+        val fused = rrfFuse(lexicalHits, denseScored, topK = fuseK).toMutableList()
+        val seen = fused.toMutableSet()
+        for (path in (filenamePaths + contentPaths).distinct().take(exactPinLimit)) {
+            if (seen.add(path)) fused.add(0, path)
+        }
+        for ((path, _) in denseScored.take(pinK)) {
+            if (seen.add(path)) fused.add(path)
+        }
+        for (hit in lexicalHits.take(lexicalPinLimit)) {
+            if (seen.add(hit.stub.path)) fused.add(hit.stub.path)
+        }
+        return fused.take(cap)
     }
 
     private fun rrfFuse(
@@ -270,11 +374,11 @@ object SearchPipeline {
 
         lexicalHits.forEachIndexed { rank, hit ->
             val path = hit.stub.path
-            scores[path] = (scores[path] ?: 0f) + BM25_RRF_WEIGHT / (RRF_K + rank + 1)
+            scores[path] = (scores[path] ?: 0f) + SearchWeights.LEXICAL_RRF_WEIGHT / (SearchWeights.RRF_K + rank + 1)
         }
 
         denseScored.forEachIndexed { rank, (path, _) ->
-            scores[path] = (scores[path] ?: 0f) + 1f / (RRF_K + rank + 1)
+            scores[path] = (scores[path] ?: 0f) + SearchWeights.DENSE_RRF_WEIGHT / (SearchWeights.RRF_K + rank + 1)
         }
 
         return scores.entries

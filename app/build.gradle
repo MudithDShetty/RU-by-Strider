@@ -33,6 +33,7 @@ android {
 
     buildFeatures {
         viewBinding true
+        buildConfig true
     }
 
     // Prevent ONNX model from being compressed inside the APK
@@ -76,4 +77,6 @@ dependencies {
 
 // Audio ID3 tags
     implementation 'net.jthink:jaudiotagger:3.0.1'
+
+    testImplementation 'junit:junit:4.13.2'
 }

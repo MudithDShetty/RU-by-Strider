@@ -140,6 +140,10 @@ class FileIndexer(
             .flatMap { it.tokens }
             .distinct()
             .forEach { parts.add(it) }
+        metadata.extractedEntities.forEach { entity ->
+            parts.add("entity:$entity")
+            parts.add(entity)
+        }
         entities.month?.let { parts.add(it) }
         entities.year?.let { parts.add(it) }
         entities.quarter?.let { parts.add(it) }
@@ -294,6 +298,7 @@ class FileIndexer(
         }
 
         loadFromDatabase()
+        db.warmEmbeddingCache()
         Log.d(TAG, "Done — indexed:$indexedCount skipped:$skippedCount deleted:${deletedPaths.size} total:$size")
     }
 
@@ -323,13 +328,23 @@ class FileIndexer(
         enrichedQuery: EnrichedQuery,
         topK: Int = 10,
         semanticEnabled: Boolean = true
-    ): List<SearchResult> = synchronized(searchLock) {
-        SearchPipeline.search(
+    ): List<SearchResult> = searchWithDiagnostics(
+        enrichedQuery, topK, semanticEnabled
+    ).results
+
+    fun searchWithDiagnostics(
+        enrichedQuery: EnrichedQuery,
+        topK: Int = 10,
+        semanticEnabled: Boolean = true,
+        trackHint: String? = null
+    ): SearchPipeline.SearchOutcome = synchronized(searchLock) {
+        SearchPipeline.searchWithDiagnostics(
             enrichedQuery   = enrichedQuery,
             engine          = engine,
             db              = db,
             topK            = topK,
-            semanticEnabled = semanticEnabled
+            semanticEnabled = semanticEnabled,
+            trackHint       = trackHint
         )
     }
 

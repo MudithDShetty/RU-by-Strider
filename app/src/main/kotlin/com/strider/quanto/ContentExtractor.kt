@@ -130,7 +130,9 @@ fun extractPdfMetadata(file: File): Map<String, String> {
 data class PdfExtract(
     val contentSnippet: String?,
     val metadata: Map<String, String>,
-    val rawText: String?
+    val rawText: String?,
+    /** Longer text window for party/entity extraction (separate from embed snippet). */
+    val entityRawText: String? = null
 )
 
 /** Single PDDocument load — content, metadata, and owner-name text together. */
@@ -155,6 +157,13 @@ fun extractPdfBundle(file: File): PdfExtract {
                 endPage   = minOf(3, doc.numberOfPages)
             }
             val rawText = stripper.getText(doc).take(MAX_CHARS)
+
+            val entityStripper = PDFTextStripper().apply {
+                startPage = 1
+                endPage   = minOf(5, doc.numberOfPages)
+            }
+            val entityRawText = entityStripper.getText(doc).take(4_000)
+
             val metaParts = listOfNotNull(
                 metadata["title"]?.let { "title $it" },
                 metadata["author"]?.let { "author $it" },
@@ -164,7 +173,12 @@ fun extractPdfBundle(file: File): PdfExtract {
                 .trim()
                 .ifBlank { null }
 
-            PdfExtract(contentSnippet, metadata, rawText.ifBlank { null })
+            PdfExtract(
+                contentSnippet = contentSnippet,
+                metadata = metadata,
+                rawText = rawText.ifBlank { null },
+                entityRawText = entityRawText.ifBlank { null }
+            )
         }
     } catch (e: Exception) {
         Log.w(TAG, "PDF extract failed ${file.name}: ${e.message}")

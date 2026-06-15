@@ -287,6 +287,43 @@ fun buildCleanQuery(rawQuery: String): String {
         .ifBlank { rawQuery.trim().lowercase() }
 }
 
+/** Stable token order for bi-encoder input — "mudith certificate" == "certificate mudith". */
+fun normalizeTokenOrderForEmbedding(cleanQuery: String): String {
+    val tokens = MultilingualBridge.tokenize(cleanQuery)
+    if (tokens.size <= 1) return cleanQuery
+    return tokens.sorted().joinToString(" ")
+}
+
+/** Document/category signal tokens — must not route mixed queries into person-name mode. */
+private val DOC_TYPE_QUERY_TOKENS: Set<String> = buildSet {
+    CATEGORY_QUERY_SIGNALS.values.flatten().forEach { signal ->
+        signal.split(Regex("\\s+")).forEach { add(it) }
+    }
+}
+
+fun isDocTypeQueryToken(token: String): Boolean =
+    token.lowercase() in DOC_TYPE_QUERY_TOKENS
+
+// ─────────────────────────────────────────────
+// Query type routing
+// ─────────────────────────────────────────────
+
+enum class QueryType {
+    GENERAL,
+    PERSON_NAME
+}
+
+fun resolveQueryType(rawQuery: String, coreTokens: List<String>): QueryType {
+    val tokens = coreTokens.ifEmpty {
+        MultilingualBridge.coreTokens(buildCleanQuery(rawQuery))
+    }.filter { it.length >= 2 }
+    if (tokens.any { isDocTypeQueryToken(it) }) return QueryType.GENERAL
+    if (tokens.size in 1..2 && tokens.all { isNameLikeToken(it) }) {
+        return QueryType.PERSON_NAME
+    }
+    return QueryType.GENERAL
+}
+
 // ─────────────────────────────────────────────
 // Enriched query data class
 // ─────────────────────────────────────────────
@@ -309,7 +346,8 @@ data class EnrichedQuery(
     /** Content-bearing tokens after stop-word removal — used for scoring, not filler. */
     val coreTokens: List<String> = emptyList(),
     val ownerIntent: OwnerIntent = OwnerIntent.NONE,
-    val ownerTargetTokens: List<String> = emptyList()
+    val ownerTargetTokens: List<String> = emptyList(),
+    val queryType: QueryType = QueryType.GENERAL
 )
 
 // ─────────────────────────────────────────────
@@ -403,6 +441,7 @@ fun enrichQuery(rawQuery: String, userNameTokens: List<String> = emptyList()): E
     val categoryHints = extractCategoryHints(rawQuery)
     val timeHint      = extractTimeHint(rawQuery)
     val cleanQuery    = buildCleanQuery(mlForms.embedQuery.ifBlank { mlForms.strippedQuery })
+    val embedQuery    = normalizeTokenOrderForEmbedding(cleanQuery)
     val typeHint      = extractTypeHint(rawQuery, cleanQuery)
     val synonymKw     = expandWithSynonyms(cleanQuery)
     val crossScriptKw = mlForms.lexicalTokens.joinToString(" ")
@@ -418,7 +457,7 @@ fun enrichQuery(rawQuery: String, userNameTokens: List<String> = emptyList()): E
         .joinToString(" ")
 
     Log.d(TAG, "Raw query    : $rawQuery")
-    Log.d(TAG, "Clean embed  : $cleanQuery")
+    Log.d(TAG, "Clean embed  : $embedQuery")
     Log.d(TAG, "BM25 keywords: $bm25WithOwner")
     Log.d(TAG, "Language hint: ${mlForms.languageHint}")
     Log.d(TAG, "Lexical tok  : ${lexicalWithOwner.take(8)}")
@@ -429,9 +468,14 @@ fun enrichQuery(rawQuery: String, userNameTokens: List<String> = emptyList()): E
     Log.d(TAG, "Period hints : $periodHints")
     Log.d(TAG, "Owner intent : $ownerIntent target=$ownerTargetTokens")
 
+    val queryType = resolveQueryType(rawQuery, mlForms.coreTokens.ifEmpty {
+        MultilingualBridge.coreTokens(cleanQuery)
+    })
+    Log.d(TAG, "Query type    : $queryType")
+
     return EnrichedQuery(
         rawQuery               = rawQuery,
-        cleanQueryForEmbedding = cleanQuery,
+        cleanQueryForEmbedding = embedQuery,
         keywordsForBm25        = bm25WithOwner,
         enrichedString         = cleanQuery,
         categoryHints          = categoryHints,
@@ -446,6 +490,7 @@ fun enrichQuery(rawQuery: String, userNameTokens: List<String> = emptyList()): E
             MultilingualBridge.coreTokens(cleanQuery)
         },
         ownerIntent            = ownerIntent,
-        ownerTargetTokens      = ownerTargetTokens
+        ownerTargetTokens      = ownerTargetTokens,
+        queryType              = queryType
     )
 }
