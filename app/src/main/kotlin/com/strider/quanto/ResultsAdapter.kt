@@ -1,9 +1,15 @@
 package com.strider.quanto
 
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -15,6 +21,17 @@ class ResultsAdapter(
 
     private var shareMode = false
     private var selectedPath: String? = null
+    private var query: String = ""
+
+    init {
+        setHasStableIds(true)
+    }
+
+    fun setQuery(raw: String) {
+        query = raw.trim()
+    }
+
+    fun shareModeEnabled(): Boolean = shareMode
 
     fun setShareMode(enabled: Boolean) {
         if (shareMode == enabled) return
@@ -25,12 +42,35 @@ class ResultsAdapter(
 
     fun setShareSelection(path: String?) {
         if (selectedPath == path) return
+        val oldPath = selectedPath
         selectedPath = path
-        notifyDataSetChanged()
+        val list = currentList
+        if (oldPath != null) {
+            val oldIdx = list.indexOfFirst { it.file.path == oldPath }
+            if (oldIdx >= 0) notifyItemChanged(oldIdx)
+        }
+        if (path != null) {
+            val newIdx = list.indexOfFirst { it.file.path == path }
+            if (newIdx >= 0) notifyItemChanged(newIdx)
+        }
     }
 
+    override fun getItemId(position: Int): Long = getItem(position).file.path.hashCode().toLong()
+
     inner class ViewHolder(val binding: ItemResultBinding) :
-        RecyclerView.ViewHolder(binding.root)
+        RecyclerView.ViewHolder(binding.root) {
+        private val sourceDotDrawable = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+        }
+
+        init {
+            binding.vSourceDot.background = sourceDotDrawable
+        }
+
+        fun bindSourceDot(color: Int) {
+            sourceDotDrawable.setColor(color)
+        }
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val binding = ItemResultBinding.inflate(
@@ -40,70 +80,63 @@ class ResultsAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val result  = getItem(position)
-        val file    = result.file
-        val context = holder.itemView.context
+        val result = getItem(position)
+        val file = result.file
+        val ctx = holder.itemView.context
 
         with(holder.binding) {
-            tvFileName.text = file.name
-            tvFilePath.text = file.metadata.typeLabel + " · " +
-                    (file.path.substringBeforeLast("/").substringAfterLast("/"))
-            tvFileSize.text = file.displaySize + " · " + file.metadata.ageBucket
-
-            tvScore.text = if (HYBRID_DEV_MODE) {
-                val branch = when {
-                    result.denseRank >= 0 && result.bm25Rank >= 0 -> "HYBRID"
-                    result.bm25Rank >= 0 -> "LEXICAL"
-                    result.denseRank >= 0 -> "GRANITE"
-                    else -> "?"
-                }
-                val catTag = if (result.categoryMatched) " ✓cat" else ""
-                val rankTag = buildString {
-                    if (result.denseRank >= 0) append(" d#${result.denseRank + 1}")
-                    if (result.bm25Rank >= 0) append(" l#${result.bm25Rank + 1}")
-                }
-                "${result.scorePercent}% [$branch$rankTag]$catTag"
-            } else {
-                "${result.scorePercent}%"
-            }
-
+            tvFileName.text = highlightName(file.name, query, ctx)
             tvExtension.text = file.extension.uppercase().take(4)
 
-            val badgeColor = extColor(file.extension)
-            (tvExtension.background as? GradientDrawable)?.setColor(badgeColor)
+            val folder = file.path.substringBeforeLast("/", "")
+                .substringAfterLast("/", "")
+                .ifBlank { "Files" }
+            tvFileSub.text = "${folder} · ${file.metadata.typeLabel} · ${file.displaySize} · ${file.metadata.ageBucket}"
+
+            val dotColor = categoryColor(file.categories.firstOrNull())
+            holder.bindSourceDot(dotColor)
 
             root.setBackgroundResource(
                 when {
                     shareMode && file.path == selectedPath -> R.drawable.bg_file_card_selected
-                    !shareMode && position == 0 -> R.drawable.bg_file_card_top
-                    else -> R.drawable.bg_file_card
+                    !shareMode && position == 0 -> R.drawable.bg_result_row_top
+                    else -> R.drawable.bg_result_row
                 }
             )
-
             root.setOnClickListener { onItemClick(result) }
         }
     }
 
-    private fun extColor(ext: String): Int = when (ext.lowercase()) {
-        "pdf"                        -> Color.parseColor("#DC3545")
-        "doc", "docx"                -> Color.parseColor("#2B579A")
-        "xls", "xlsx", "csv"         -> Color.parseColor("#217346")
-        "ppt", "pptx"                -> Color.parseColor("#D24726")
-        "jpg", "jpeg", "png",
-        "heic", "webp", "gif"        -> Color.parseColor("#0D9E76")
-        "mp3", "aac", "flac",
-        "wav", "m4a"                 -> Color.parseColor("#7C3AED")
-        "mp4", "mkv", "avi", "mov"   -> Color.parseColor("#E67E22")
-        "py", "js", "ts", "kt",
-        "java", "cpp", "c", "h"      -> Color.parseColor("#1A1530")
-        "zip", "rar", "7z",
-        "tar", "gz", "apk"           -> Color.parseColor("#888888")
-        else                         -> Color.parseColor("#C41E3A")
+    private fun highlightName(name: String, rawQuery: String, ctx: android.content.Context): CharSequence {
+        if (rawQuery.isBlank()) return name
+        val tokens = rawQuery.split(Regex("\\s+")).filter { it.length >= 2 }
+        if (tokens.isEmpty()) return name
+        val spannable = SpannableString(name)
+        val crimson = ContextCompat.getColor(ctx, R.color.ru_crimson)
+        tokens.forEach { token ->
+            var start = name.indexOf(token, ignoreCase = true)
+            while (start >= 0) {
+                val end = start + token.length
+                spannable.setSpan(ForegroundColorSpan(crimson), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                spannable.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                start = name.indexOf(token, start + 1, ignoreCase = true)
+            }
+        }
+        return spannable
     }
 
+    private fun categoryColor(category: Category?): Int = CATEGORY_COLORS[category ?: Category.GENERAL]
+        ?: CATEGORY_COLORS.getValue(Category.GENERAL)
+
     companion object {
-        /** Debug builds only — fusion badges and golden eval logging. */
-        val HYBRID_DEV_MODE: Boolean = BuildConfig.DEBUG
+        private val CATEGORY_COLORS = mapOf(
+            Category.IDENTITY to Color.parseColor("#C41E3A"),
+            Category.WORK to Color.parseColor("#3B65DC"),
+            Category.EDUCATION to Color.parseColor("#8B6200"),
+            Category.PERSONAL to Color.parseColor("#0D9E76"),
+            Category.MEDIA to Color.parseColor("#7C3AED"),
+            Category.GENERAL to Color.parseColor("#888888"),
+        )
 
         private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<SearchResult>() {
             override fun areItemsTheSame(a: SearchResult, b: SearchResult) =

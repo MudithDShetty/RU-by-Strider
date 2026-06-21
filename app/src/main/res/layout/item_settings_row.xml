@@ -1,67 +1,77 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
-    android:padding="14dp"
+    android:paddingStart="15dp"
+    android:paddingEnd="15dp"
+    android:paddingTop="14dp"
+    android:paddingBottom="14dp"
     android:gravity="center_vertical"
     android:clickable="true"
     android:focusable="true"
     android:background="?attr/selectableItemBackground">
 
-    <LinearLayout
+    <FrameLayout
         android:id="@+id/llIconWrap"
-        android:layout_width="32dp"
-        android:layout_height="32dp"
-        android:gravity="center"
-        android:background="@drawable/bg_settings_icon"
-        android:layout_marginEnd="12dp">
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_marginEnd="13dp"
+        android:background="@drawable/bg_settings_icon">
+
         <ImageView
             android:id="@+id/ivRowIcon"
-            android:layout_width="16dp"
-            android:layout_height="16dp"
-            android:src="@drawable/ic_search"/>
-    </LinearLayout>
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_search"
+            app:tint="@color/ru_crimson"/>
+    </FrameLayout>
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:orientation="vertical">
+
         <TextView
             android:id="@+id/tvRowTitle"
+            style="@style/RuText.RowTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Setting"
-            android:textSize="13sp"
-            android:fontFamily="sans-serif-medium"
-            android:textColor="@color/text_primary"/>
+            android:text="Setting"/>
+
         <TextView
             android:id="@+id/tvRowSub"
+            style="@style/RuText.RowSub"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Subtitle"
-            android:textSize="11sp"
-            android:textColor="@color/text_hint"
-            android:layout_marginTop="1dp"/>
+            android:text="Subtitle"/>
     </LinearLayout>
 
-    <!-- Toggle (shown for boolean settings) -->
+    <TextView
+        android:id="@+id/tvRowValue"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="@color/text_secondary"
+        android:fontFamily="@font/hanken_grotesk_medium"
+        android:visibility="gone"/>
+
     <com.google.android.material.switchmaterial.SwitchMaterial
         android:id="@+id/switchRow"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:visibility="gone"/>
 
-    <!-- Chevron (shown for action settings) -->
     <ImageView
         android:id="@+id/ivChevron"
         android:layout_width="14dp"
         android:layout_height="14dp"
         android:src="@drawable/ic_chevron_right"
         android:visibility="gone"
-        xmlns:app="http://schemas.android.com/apk/res-auto"
         app:tint="@color/text_hint"/>
 
 </LinearLayout>

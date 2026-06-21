@@ -1,6 +1,7 @@
 package com.strider.quanto
 
 import android.util.Log
+import com.strider.quanto.eval.EvalLogger
 
 private const val TAG = "SearchPipeline"
 
@@ -17,6 +18,26 @@ object SearchPipeline {
     data class SearchOutcome(
         val results: List<SearchResult>,
         val diagnostics: SearchDiagnostics?
+    )
+
+    internal data class PassMetrics(
+        val totalIndexed: Int,
+        val filenamePathCount: Int,
+        val contentPathCount: Int,
+        val candidatePoolSize: Int,
+        val lexicalCount: Int,
+        val lexicalTopRaw: Float,
+        val denseTopK: Int,
+        val denseTopScore: Float,
+        val denseTotalScanned: Int,
+        val embeddingCacheWarm: Boolean,
+        val fusedPoolSize: Int,
+        val passReason: String,
+        val expanded: Boolean,
+        val topScore: Float,
+        val resultCount: Int,
+        val timingMs: Map<String, Long>,
+        val goldenResult: SearchEval.GoldenResult? = null
     )
 
     fun search(
@@ -37,6 +58,8 @@ object SearchPipeline {
         semanticEnabled: Boolean = true,
         trackHint: String? = null
     ): SearchOutcome {
+        val searchStartNs = System.nanoTime()
+
         val primary = runSearchPass(
             enrichedQuery = enrichedQuery,
             engine          = engine,
@@ -48,7 +71,8 @@ object SearchPipeline {
             trackHint       = trackHint
         )
 
-        val outcome = if (!needsFallback(primary, semanticEnabled, db)) {
+        val fallbackTriggered = needsFallback(primary, semanticEnabled, db)
+        val outcome = if (!fallbackTriggered) {
             primary
         } else {
             Log.i(TAG, "Recall fallback triggered (${primary.reason}) — expanding lexical pool")
@@ -72,6 +96,47 @@ object SearchPipeline {
             }
         }
 
+        if (EvalLogger.enabled) {
+            val metrics = outcome.metrics
+            val totalMs = nsToMs(System.nanoTime() - searchStartNs)
+            val timingMs = metrics.timingMs.toMutableMap().apply {
+                this["total"] = totalMs
+            }
+            val retrieval = mapOf<String, Any?>(
+                "total_indexed" to metrics.totalIndexed,
+                "filename_path_count" to metrics.filenamePathCount,
+                "content_path_count" to metrics.contentPathCount,
+                "candidate_pool_size" to metrics.candidatePoolSize,
+                "lexical_count" to metrics.lexicalCount,
+                "lexical_top_raw" to metrics.lexicalTopRaw,
+                "dense_top_k" to metrics.denseTopK,
+                "dense_top_score" to metrics.denseTopScore,
+                "dense_total_scanned" to metrics.denseTotalScanned,
+                "embedding_cache_warm" to metrics.embeddingCacheWarm,
+                "fused_pool_size" to metrics.fusedPoolSize,
+                "pass_reason" to metrics.passReason,
+                "expanded_pass" to metrics.expanded,
+                "fallback_triggered" to fallbackTriggered,
+                "fallback_used" to (fallbackTriggered && outcome.expanded),
+                "fallback_reason" to if (fallbackTriggered) primary.reason else "",
+                "top_score" to metrics.topScore,
+                "result_count" to metrics.resultCount
+            )
+            EvalLogger.logSearch(
+                EvalLogger.buildSearchSnapshot(
+                    enrichedQuery = enrichedQuery,
+                    semanticEnabled = semanticEnabled,
+                    topK = topK,
+                    trigger = EvalLogger.pendingSearchTrigger,
+                    retrieval = retrieval,
+                    results = outcome.results,
+                    timingMs = timingMs,
+                    debugTarget = outcome.diagnostics?.targetReport,
+                    goldenEval = metrics.goldenResult
+                )
+            )
+        }
+
         return SearchOutcome(outcome.results, outcome.diagnostics)
     }
 
@@ -82,7 +147,9 @@ object SearchPipeline {
         val lexicalTopRaw: Float,
         val denseTop: Float,
         val reason: String = "",
-        val diagnostics: SearchDiagnostics? = null
+        val diagnostics: SearchDiagnostics? = null,
+        val metrics: PassMetrics,
+        val expanded: Boolean = false
     )
 
     private data class DenseRetrieveResult(
@@ -101,6 +168,12 @@ object SearchPipeline {
         denseOverride: List<Pair<String, Float>>?,
         trackHint: String? = null
     ): SearchPassResult {
+        val startNs = System.nanoTime()
+        var tAfterCandidates = startNs
+        var tAfterLexical = startNs
+        var tAfterDense = startNs
+        var tAfterRerank = startNs
+
         val totalCount = db.getTotalCount()
         val filenamePaths = FilenameSearch.gatherPaths(db, enrichedQuery)
         val contentPaths = ContentSearch.gatherPaths(db, enrichedQuery)
@@ -109,9 +182,15 @@ object SearchPipeline {
         } else {
             DiskSearch.gatherCandidatePaths(db, enrichedQuery)
         }
+        tAfterCandidates = System.nanoTime()
 
         if (candidatePaths.isEmpty() && denseOverride.isNullOrEmpty()) {
-            return SearchPassResult(emptyList(), 0f, 0, 0f, 0f, "no candidates")
+            return emptyPassResult(
+                enrichedQuery, db, expanded, "no candidates",
+                totalCount, filenamePaths.size, contentPaths.size, 0,
+                startNs, tAfterCandidates, tAfterLexical, tAfterDense, tAfterRerank,
+                emptyList(), emptyList(), emptyList()
+            )
         }
 
         val stubs = if (candidatePaths.isNotEmpty()) {
@@ -129,6 +208,7 @@ object SearchPipeline {
         } else {
             emptyList()
         }
+        tAfterLexical = System.nanoTime()
         val lexicalMap = lexicalHits.associate { it.stub.path to it.score }
 
         val denseResult: DenseRetrieveResult? = when {
@@ -143,13 +223,19 @@ object SearchPipeline {
             )
             else -> null
         }
+        tAfterDense = System.nanoTime()
         val denseScored = denseResult?.scored ?: emptyList()
 
         val loadEmbeddings: (List<String>) -> Map<String, FloatArray> =
             { paths -> db.loadEmbeddingsForPaths(paths) }
 
         if (lexicalHits.isEmpty() && denseScored.isEmpty()) {
-            return SearchPassResult(emptyList(), 0f, 0, 0f, 0f, "no hits")
+            return emptyPassResult(
+                enrichedQuery, db, expanded, "no hits",
+                totalCount, filenamePaths.size, contentPaths.size, candidatePaths.size,
+                startNs, tAfterCandidates, tAfterLexical, tAfterDense, tAfterRerank,
+                candidatePaths, emptyList(), emptyList()
+            )
         }
 
         val lexicalTopRaw = lexicalHits.firstOrNull()?.score ?: 0f
@@ -164,17 +250,28 @@ object SearchPipeline {
                     denseRank = -1
                 )
             }
+            tAfterRerank = System.nanoTime()
+            val reason = if (expanded) "expanded lexical" else "lexical only"
             return SearchPassResult(
                 results = results,
                 topScore = results.firstOrNull()?.score ?: 0f,
                 lexicalCount = lexicalHits.size,
                 lexicalTopRaw = lexicalTopRaw,
                 denseTop = 0f,
-                reason = if (expanded) "expanded lexical" else "lexical only",
+                reason = reason,
                 diagnostics = buildDiagnostics(
                     trackHint, enrichedQuery.cleanQueryForEmbedding, db, candidatePaths, lexicalHits, null,
                     emptyList(), results, semanticEnabled = false, denseTopK = 0
-                )
+                ),
+                metrics = buildPassMetrics(
+                    db, totalCount, filenamePaths.size, contentPaths.size, candidatePaths.size,
+                    lexicalHits.size, lexicalTopRaw, 0, 0f, 0,
+                    fusedPoolSize = 0, passReason = reason, expanded = expanded,
+                    topScore = results.firstOrNull()?.score ?: 0f, resultCount = results.size,
+                    startNs, tAfterCandidates, tAfterLexical, tAfterDense, tAfterRerank,
+                    goldenResult = goldenEval(enrichedQuery, candidatePaths, emptyList(), results)
+                ),
+                expanded = expanded
             )
         }
 
@@ -187,7 +284,6 @@ object SearchPipeline {
 
         val candidates = fusedPaths.mapNotNull { path ->
             val stub = fusionStubMap[path] ?: stubMap[path] ?: run {
-                // Fallback dense hit may be outside lexical pool — load stub on demand
                 db.loadStubsForPaths(listOf(path)).firstOrNull()
             } ?: return@mapNotNull null
             val emb = embeddings[path] ?: loadEmbeddings(listOf(path))[path] ?: return@mapNotNull null
@@ -204,6 +300,7 @@ object SearchPipeline {
                     denseRank = -1
                 )
             }
+            tAfterRerank = System.nanoTime()
             return SearchPassResult(
                 results = results,
                 topScore = results.firstOrNull()?.score ?: 0f,
@@ -215,7 +312,19 @@ object SearchPipeline {
                     trackHint, enrichedQuery.cleanQueryForEmbedding, db, candidatePaths, lexicalHits, denseResult?.scan,
                     fusedPaths, results, semanticEnabled = true,
                     denseTopK = denseResult?.denseTopK ?: 0
-                )
+                ),
+                metrics = buildPassMetrics(
+                    db, totalCount, filenamePaths.size, contentPaths.size, candidatePaths.size,
+                    lexicalHits.size, lexicalTopRaw,
+                    denseResult?.denseTopK ?: 0,
+                    denseScored.firstOrNull()?.second ?: 0f,
+                    denseResult?.scan?.totalScanned ?: 0,
+                    fusedPoolSize = fusedPaths.size, passReason = "candidates empty", expanded = expanded,
+                    topScore = results.firstOrNull()?.score ?: 0f, resultCount = results.size,
+                    startNs, tAfterCandidates, tAfterLexical, tAfterDense, tAfterRerank,
+                    goldenResult = goldenEval(enrichedQuery, candidatePaths, fusedPaths, results)
+                ),
+                expanded = expanded
             )
         }
 
@@ -234,21 +343,130 @@ object SearchPipeline {
             query = enrichedQuery,
             topK  = topK
         )
+        tAfterRerank = System.nanoTime()
 
+        val reason = if (expanded) "expanded hybrid" else "hybrid"
         return SearchPassResult(
             results = results,
             topScore = results.firstOrNull()?.score ?: 0f,
             lexicalCount = lexicalHits.size,
             lexicalTopRaw = lexicalTopRaw,
             denseTop = denseScored.firstOrNull()?.second ?: 0f,
-            reason = if (expanded) "expanded hybrid" else "hybrid",
+            reason = reason,
             diagnostics = buildDiagnostics(
                 trackHint, enrichedQuery.cleanQueryForEmbedding, db, candidatePaths, lexicalHits, denseResult?.scan,
                 fusedPaths, results, semanticEnabled = true,
                 denseTopK = denseResult?.denseTopK ?: 0
-            )
+            ),
+            metrics = buildPassMetrics(
+                db, totalCount, filenamePaths.size, contentPaths.size, candidatePaths.size,
+                lexicalHits.size, lexicalTopRaw,
+                denseResult?.denseTopK ?: 0,
+                denseScored.firstOrNull()?.second ?: 0f,
+                denseResult?.scan?.totalScanned ?: 0,
+                fusedPoolSize = fusedPaths.size, passReason = reason, expanded = expanded,
+                topScore = results.firstOrNull()?.score ?: 0f, resultCount = results.size,
+                startNs, tAfterCandidates, tAfterLexical, tAfterDense, tAfterRerank,
+                goldenResult = goldenEval(enrichedQuery, candidatePaths, fusedPaths, results)
+            ),
+            expanded = expanded
         )
     }
+
+    private fun emptyPassResult(
+        enrichedQuery: EnrichedQuery,
+        db: DatabaseHelper,
+        expanded: Boolean,
+        reason: String,
+        totalCount: Int,
+        filenameCount: Int,
+        contentCount: Int,
+        candidatePoolSize: Int,
+        startNs: Long,
+        tAfterCandidates: Long,
+        tAfterLexical: Long,
+        tAfterDense: Long,
+        tAfterRerank: Long,
+        candidatePaths: List<String>,
+        fusedPaths: List<String>,
+        results: List<SearchResult>
+    ): SearchPassResult = SearchPassResult(
+        results = results,
+        topScore = 0f,
+        lexicalCount = 0,
+        lexicalTopRaw = 0f,
+        denseTop = 0f,
+        reason = reason,
+        diagnostics = null,
+        metrics = buildPassMetrics(
+            db, totalCount, filenameCount, contentCount, candidatePoolSize,
+            0, 0f, 0, 0f, 0,
+            fusedPoolSize = fusedPaths.size, passReason = reason, expanded = expanded,
+            topScore = 0f, resultCount = results.size,
+            startNs, tAfterCandidates, tAfterLexical, tAfterDense, tAfterRerank,
+            goldenResult = goldenEval(enrichedQuery, candidatePaths, fusedPaths, results)
+        ),
+        expanded = expanded
+    )
+
+    private fun goldenEval(
+        enrichedQuery: EnrichedQuery,
+        candidatePaths: List<String>,
+        fusedPaths: List<String>,
+        results: List<SearchResult>
+    ): SearchEval.GoldenResult? = SearchEval.evaluate(
+        enrichedQuery.rawQuery, candidatePaths, fusedPaths, results
+    )
+
+    private fun buildPassMetrics(
+        db: DatabaseHelper,
+        totalIndexed: Int,
+        filenamePathCount: Int,
+        contentPathCount: Int,
+        candidatePoolSize: Int,
+        lexicalCount: Int,
+        lexicalTopRaw: Float,
+        denseTopK: Int,
+        denseTopScore: Float,
+        denseTotalScanned: Int,
+        fusedPoolSize: Int,
+        passReason: String,
+        expanded: Boolean,
+        topScore: Float,
+        resultCount: Int,
+        startNs: Long,
+        tAfterCandidates: Long,
+        tAfterLexical: Long,
+        tAfterDense: Long,
+        tAfterRerank: Long,
+        goldenResult: SearchEval.GoldenResult?
+    ): PassMetrics = PassMetrics(
+        totalIndexed = totalIndexed,
+        filenamePathCount = filenamePathCount,
+        contentPathCount = contentPathCount,
+        candidatePoolSize = candidatePoolSize,
+        lexicalCount = lexicalCount,
+        lexicalTopRaw = lexicalTopRaw,
+        denseTopK = denseTopK,
+        denseTopScore = denseTopScore,
+        denseTotalScanned = denseTotalScanned,
+        embeddingCacheWarm = db.isEmbeddingCacheWarm(),
+        fusedPoolSize = fusedPoolSize,
+        passReason = passReason,
+        expanded = expanded,
+        topScore = topScore,
+        resultCount = resultCount,
+        timingMs = mapOf(
+            "candidate_gather" to nsToMs(tAfterCandidates - startNs),
+            "lexical" to nsToMs(tAfterLexical - tAfterCandidates),
+            "dense" to nsToMs(tAfterDense - tAfterLexical),
+            "rerank" to nsToMs(tAfterRerank - tAfterDense),
+            "total" to nsToMs(tAfterRerank - startNs)
+        ),
+        goldenResult = goldenResult
+    )
+
+    private fun nsToMs(ns: Long): Long = ns / 1_000_000
 
     private fun buildDiagnostics(
         trackHint: String?,

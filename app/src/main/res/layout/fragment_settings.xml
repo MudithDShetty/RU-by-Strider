@@ -1,151 +1,150 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/ru_bg">
+    android:background="@color/ru_bg"
+    android:overScrollMode="never">
 
-    <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp"
-        android:paddingTop="16dp"
-        android:paddingBottom="12dp"
-        android:gravity="center_vertical">
-
-        <ImageButton
-            android:id="@+id/btnBack"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:src="@drawable/ic_back"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Back"
-            app:tint="@color/text_primary"/>
+        android:orientation="vertical"
+        android:paddingStart="@dimen/ru_content_padding_h_settings"
+        android:paddingEnd="@dimen/ru_content_padding_h_settings"
+        android:paddingTop="22dp"
+        android:paddingBottom="24dp">
 
         <TextView
-            android:layout_width="0dp"
+            style="@style/RuText.PageTitle"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="Settings"
-            android:textSize="17sp"
-            android:fontFamily="sans-serif-medium"
-            android:textColor="@color/text_primary"/>
+            android:text="@string/nav_settings"/>
 
-    </LinearLayout>
-
-    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider"/>
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:overScrollMode="never"
-        android:padding="16dp">
+        <TextView
+            style="@style/RuText.SectionHeader"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:layout_marginBottom="10dp"
+            android:text="@string/settings_section_search"/>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:elevation="2dp">
 
-            <!-- Search section -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="SEARCH"
-                android:textSize="10sp"
-                android:fontFamily="sans-serif-medium"
-                android:textColor="@color/text_hint"
-                android:letterSpacing="0.1"
-                android:paddingStart="4dp"
-                android:layout_marginBottom="8dp"/>
-
-            <LinearLayout
+            <include
+                android:id="@+id/rowYourName"
+                layout="@layout/item_settings_row"/>
+            <View
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/bg_settings_card"
-                android:layout_marginBottom="20dp">
-
-                <include layout="@layout/item_settings_row"
-                    android:id="@+id/rowYourName"/>
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider" android:layout_marginStart="52dp"/>
-                <include layout="@layout/item_settings_row"
-                    android:id="@+id/rowSemantic"/>
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider" android:layout_marginStart="52dp"/>
-                <include layout="@layout/item_settings_row"
-                    android:id="@+id/rowVoice"/>
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider" android:layout_marginStart="52dp"/>
-                <include layout="@layout/item_settings_row"
-                    android:id="@+id/rowMultilingual"/>
-
-            </LinearLayout>
-
-            <!-- Indexing section -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="INDEXING"
-                android:textSize="10sp"
-                android:fontFamily="sans-serif-medium"
-                android:textColor="@color/text_hint"
-                android:letterSpacing="0.1"
-                android:paddingStart="4dp"
-                android:layout_marginBottom="8dp"/>
-
-            <LinearLayout
+                android:layout_height="1dp"
+                android:background="@color/divider"/>
+            <include
+                android:id="@+id/rowSemantic"
+                layout="@layout/item_settings_row"/>
+            <View
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/bg_settings_card"
-                android:layout_marginBottom="20dp">
-
-                <include layout="@layout/item_settings_row"
-                    android:id="@+id/rowContent"/>
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider" android:layout_marginStart="52dp"/>
-                <include layout="@layout/item_settings_row"
-                    android:id="@+id/rowMaxFiles"/>
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider" android:layout_marginStart="52dp"/>
-                <include layout="@layout/item_settings_row"
-                    android:id="@+id/rowAutoReindex"/>
-
-            </LinearLayout>
-
-            <!-- About section -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="ABOUT"
-                android:textSize="10sp"
-                android:fontFamily="sans-serif-medium"
-                android:textColor="@color/text_hint"
-                android:letterSpacing="0.1"
-                android:paddingStart="4dp"
-                android:layout_marginBottom="8dp"/>
-
-            <LinearLayout
+                android:layout_height="1dp"
+                android:background="@color/divider"/>
+            <include
+                android:id="@+id/rowVoice"
+                layout="@layout/item_settings_row"/>
+            <View
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/bg_settings_card">
-
-                <include layout="@layout/item_settings_row"
-                    android:id="@+id/rowVersion"/>
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider" android:layout_marginStart="52dp"/>
-                <include layout="@layout/item_settings_row"
-                    android:id="@+id/rowModel"/>
-                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider" android:layout_marginStart="52dp"/>
-                <include layout="@layout/item_settings_row"
-                    android:id="@+id/rowClear"/>
-
-            </LinearLayout>
-
+                android:layout_height="1dp"
+                android:background="@color/divider"/>
+            <include
+                android:id="@+id/rowMultilingual"
+                layout="@layout/item_settings_row"/>
         </LinearLayout>
-    </ScrollView>
 
-</LinearLayout>
+        <TextView
+            style="@style/RuText.SectionHeader"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:layout_marginBottom="10dp"
+            android:text="@string/settings_section_indexing"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:elevation="2dp">
+
+            <include
+                android:id="@+id/rowContent"
+                layout="@layout/item_settings_row"/>
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"/>
+            <include
+                android:id="@+id/rowMaxFiles"
+                layout="@layout/item_settings_row"/>
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"/>
+            <include
+                android:id="@+id/rowAutoReindex"
+                layout="@layout/item_settings_row"/>
+        </LinearLayout>
+
+        <TextView
+            style="@style/RuText.SectionHeader"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:layout_marginBottom="10dp"
+            android:text="@string/settings_section_about"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:elevation="2dp">
+
+            <include
+                android:id="@+id/rowSetupStatus"
+                layout="@layout/item_settings_row"/>
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"/>
+            <include
+                android:id="@+id/rowVersion"
+                layout="@layout/item_settings_row"/>
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"/>
+            <include
+                android:id="@+id/rowModel"
+                layout="@layout/item_settings_row"/>
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"/>
+            <include
+                android:id="@+id/rowClear"
+                layout="@layout/item_settings_row"/>
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:gravity="center"
+            android:text="@string/settings_footer"
+            android:textSize="11.5sp"
+            android:textColor="@color/text_secondary"
+            android:fontFamily="@font/hanken_grotesk_regular"/>
+
+    </LinearLayout>
+</ScrollView>

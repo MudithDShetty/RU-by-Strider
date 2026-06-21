@@ -8,19 +8,93 @@
         <item name="android:windowBackground">@color/ru_bg</item>
         <item name="android:statusBarColor">@color/ru_bg</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:fontFamily">@font/hanken_grotesk</item>
+        <item name="switchStyle">@style/RuSwitch</item>
+    </style>
+
+    <style name="RuSwitch" parent="Widget.MaterialComponents.CompoundButton.Switch">
+        <item name="trackTint">@color/switch_track_ru</item>
+        <item name="thumbTint">@color/switch_thumb_ru</item>
+        <item name="android:minWidth">46dp</item>
+        <item name="android:minHeight">27dp</item>
+    </style>
+
+    <style name="RuText"/>
+
+    <style name="RuText.Wordmark">
+        <item name="android:fontFamily">@font/fraunces_semibold</item>
+        <item name="android:textSize">@dimen/home_wordmark_size</item>
+        <item name="android:textColor">@color/ru_crimson</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:letterSpacing">-0.03</item>
+        <item name="android:lineSpacingMultiplier">0.82</item>
+    </style>
+
+    <style name="RuText.ResultsWordmark">
+        <item name="android:fontFamily">@font/fraunces_semibold</item>
+        <item name="android:textSize">@dimen/results_wordmark_size</item>
+        <item name="android:textColor">@color/ru_crimson</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+
+    <style name="RuText.PageTitle">
+        <item name="android:fontFamily">@font/fraunces_semibold</item>
+        <item name="android:textSize">26sp</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+
+    <style name="RuText.OnboardingTitle">
+        <item name="android:fontFamily">@font/fraunces_semibold</item>
+        <item name="android:textSize">25sp</item>
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <style name="RuText.SectionHeader">
+        <item name="android:fontFamily">@font/hanken_grotesk_semibold</item>
+        <item name="android:textSize">10.5sp</item>
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:letterSpacing">0.12</item>
+    </style>
+
+    <style name="RuText.RowTitle">
+        <item name="android:fontFamily">@font/hanken_grotesk_medium</item>
+        <item name="android:textSize">14.5sp</item>
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <style name="RuText.RowSub">
+        <item name="android:fontFamily">@font/hanken_grotesk_regular</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:layout_marginTop">6dp</item>
+    </style>
+
+    <style name="RuText.TabLabel">
+        <item name="android:fontFamily">@font/hanken_grotesk_semibold</item>
+        <item name="android:textSize">10sp</item>
+        <item name="android:textColor">@color/nav_tab_text</item>
+    </style>
+
+    <style name="RuText.Button">
+        <item name="android:fontFamily">@font/hanken_grotesk_semibold</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@android:color/white</item>
     </style>
 
     <style name="RuButton.Primary" parent="Widget.MaterialComponents.Button">
         <item name="android:background">@drawable/bg_btn_primary</item>
         <item name="android:textColor">@android:color/white</item>
-        <item name="android:textSize">15sp</item>
-        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:fontFamily">@font/hanken_grotesk_semibold</item>
         <item name="android:letterSpacing">0.01</item>
+        <item name="android:minHeight">52dp</item>
         <item name="android:paddingTop">14dp</item>
         <item name="android:paddingBottom">14dp</item>
         <item name="android:stateListAnimator">@null</item>
-        <item name="cornerRadius">14dp</item>
+        <item name="cornerRadius">26dp</item>
     </style>
 
     <style name="RuButton.Outline" parent="Widget.MaterialComponents.Button.OutlinedButton">
@@ -31,7 +105,7 @@
         <item name="android:paddingTop">12dp</item>
         <item name="android:paddingBottom">12dp</item>
         <item name="android:stateListAnimator">@null</item>
-        <item name="cornerRadius">14dp</item>
+        <item name="cornerRadius">26dp</item>
     </style>
 
     <style name="RuChip" parent="Widget.MaterialComponents.Chip.Filter">

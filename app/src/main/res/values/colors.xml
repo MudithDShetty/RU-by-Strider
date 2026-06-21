@@ -20,6 +20,16 @@
     <color name="surface_solid">#FFFFFF</color>
     <color name="divider">#0D000000</color>
 
+    <!-- Component fills (light) -->
+    <color name="ru_search_bar_fill">#FFF8F0E3</color>
+    <color name="ru_nav_bar_fill">#E0FFFFFF</color>
+    <color name="ru_loading_scrim">#CCF5EDE8</color>
+    <color name="ru_skeleton_fill">#12000000</color>
+    <color name="ru_mic_breathe">#1AC41E3A</color>
+    <color name="ru_focus_ring">#38C41E3A</color>
+    <color name="ru_settings_icon_bg">#0D000000</color>
+    <color name="ru_init_banner">#F5EDE8</color>
+
     <!-- Category colors -->
     <color name="cat_work">#3B65DC</color>
     <color name="cat_identity">#C41E3A</color>

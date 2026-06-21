@@ -1,195 +1,157 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/ru_bg">
+    android:background="@color/ru_bg"
+    android:fillViewport="true"
+    android:overScrollMode="never">
 
-    <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp"
-        android:paddingTop="16dp"
-        android:paddingBottom="12dp"
-        android:gravity="center_vertical"
-        android:background="@color/ru_bg">
-
-        <ImageButton
-            android:id="@+id/btnBack"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:src="@drawable/ic_back"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Back"
-            app:tint="@color/text_primary"/>
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="File Index"
-            android:textSize="17sp"
-            android:fontFamily="sans-serif-medium"
-            android:textColor="@color/text_primary"/>
-
-    </LinearLayout>
-
-    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/divider"/>
-
-    <!-- Content -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="match_parent"
+        android:minHeight="400dp"
         android:orientation="vertical"
-        android:gravity="center_horizontal"
-        android:paddingStart="24dp"
-        android:paddingEnd="24dp"
-        android:paddingTop="48dp">
+        android:gravity="center_horizontal">
 
-        <!-- Wordmark -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="RU"
-            android:textSize="48sp"
-            android:fontFamily="serif"
-            android:textStyle="bold"
-            android:textColor="@color/ru_dark"
-            android:letterSpacing="-0.05"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="On-device semantic search"
-            android:textSize="12sp"
-            android:textColor="@color/text_hint"
-            android:layout_marginBottom="32dp"/>
-
-        <!-- Idle state -->
-        <LinearLayout
-            android:id="@+id/llIdleState"
+        <Space
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center_horizontal">
+            android:layout_height="0dp"
+            android:layout_weight="1"/>
 
-            <TextView
-                android:id="@+id/tvIndexCount"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="0"
-                android:textSize="36sp"
-                android:fontFamily="serif"
-                android:textStyle="bold"
-                android:textColor="@color/ru_dark"/>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="files indexed"
-                android:textSize="12sp"
-                android:textColor="@color/text_hint"
-                android:layout_marginBottom="16dp"/>
-
-            <!-- Bucket pills -->
-            <HorizontalScrollView
-                android:id="@+id/hsvBuckets"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:scrollbars="none"
-                android:layout_marginBottom="24dp"
-                android:visibility="gone">
-                <LinearLayout
-                    android:id="@+id/llBuckets"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"/>
-            </HorizontalScrollView>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnIndex"
-                style="@style/RuButton.Primary"
-                android:layout_width="220dp"
-                android:layout_height="wrap_content"
-                android:text="@string/btn_index"/>
-
-            <TextView
-                android:id="@+id/tvIdleStatus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Tap to scan and index all files"
-                android:textSize="11sp"
-                android:textColor="@color/text_hint"
-                android:layout_marginTop="10dp"/>
-
-        </LinearLayout>
-
-        <!-- Running state -->
         <LinearLayout
-            android:id="@+id/llRunningState"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:gravity="center_horizontal"
-            android:visibility="gone">
+            android:paddingStart="@dimen/ru_content_padding_h"
+            android:paddingEnd="@dimen/ru_content_padding_h">
 
             <TextView
-                android:id="@+id/tvLiveCount"
+                android:id="@+id/tvIndexWordmark"
+                style="@style/RuText.Wordmark"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="0"
-                android:textSize="32sp"
-                android:fontFamily="serif"
-                android:textStyle="bold"
-                android:textColor="@color/ru_dark"/>
+                android:layout_height="wrap_content"/>
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="files indexed"
-                android:textSize="11sp"
-                android:textColor="@color/text_hint"
-                android:layout_marginBottom="12dp"/>
+                android:layout_marginTop="6dp"
+                android:text="@string/index_subtitle"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:fontFamily="@font/hanken_grotesk_regular"/>
+
+            <FrameLayout
+                android:layout_width="188dp"
+                android:layout_height="188dp"
+                android:layout_marginTop="@dimen/index_dial_margin_top">
+
+                <com.strider.quanto.ui.IndexProgressDialView
+                    android:id="@+id/indexDial"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"/>
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal">
+
+                    <TextView
+                        android:id="@+id/tvDialCount"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0"
+                        android:textSize="46sp"
+                        android:fontFamily="@font/fraunces_semibold"
+                        android:textColor="@color/text_primary"
+                        android:fontFeatureSettings="tnum"
+                        android:includeFontPadding="false"/>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/index_files_label"
+                        android:textSize="12sp"
+                        android:textColor="@color/text_secondary"
+                        android:fontFamily="@font/hanken_grotesk_regular"/>
+                </LinearLayout>
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/tvIndexPhase"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="18dp"
+                android:layout_marginTop="4dp"
+                android:gravity="center"
+                android:text="@string/index_phase_idle"
+                android:textSize="@dimen/index_phase_text_size"
+                android:textColor="@color/text_secondary"
+                android:fontFamily="@font/hanken_grotesk_regular"/>
+
+            <com.google.android.flexbox.FlexboxLayout
+                android:id="@+id/flexBuckets"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/index_buckets_margin_top"
+                android:visibility="gone"
+                app:flexWrap="wrap"
+                app:justifyContent="center"
+                app:alignItems="center"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnIndex"
+                style="@style/RuButton.Primary"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="@dimen/index_button_margin_top"
+                android:text="@string/btn_index"
+                app:icon="@drawable/ic_refresh"
+                app:iconGravity="textStart"
+                app:iconPadding="8dp"
+                app:iconTint="@android:color/white"/>
 
             <ProgressBar
-                android:id="@+id/progressIndexBar"
+                android:id="@+id/progressScanBar"
                 style="?android:attr/progressBarStyleHorizontal"
-                android:layout_width="match_parent"
-                android:layout_height="3dp"
+                android:layout_width="248dp"
+                android:layout_height="4dp"
+                android:layout_marginTop="14dp"
                 android:indeterminate="true"
-                android:indeterminateTint="@color/ru_crimson"/>
+                android:indeterminateTint="@color/ru_crimson"
+                android:visibility="gone"/>
 
             <TextView
                 android:id="@+id/tvCurrentFile"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Scanning documents…"
-                android:textSize="11sp"
-                android:textColor="@color/text_secondary"
+                android:layout_marginTop="8dp"
                 android:gravity="center"
-                android:layout_marginTop="10dp"
+                android:textSize="11.5sp"
+                android:textColor="@color/text_secondary"
+                android:fontFamily="monospace"
                 android:maxLines="1"
-                android:ellipsize="middle"/>
+                android:ellipsize="middle"
+                android:visibility="gone"/>
 
             <TextView
-                android:id="@+id/tvIndexPhase"
-                android:layout_width="wrap_content"
+                android:id="@+id/tvIndexHint"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Documents → Code → Media"
-                android:textSize="10sp"
-                android:textColor="@color/text_hint"
-                android:layout_marginTop="4dp"/>
-
+                android:layout_marginTop="12dp"
+                android:gravity="center"
+                android:text="@string/index_hint_idle"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:fontFamily="@font/hanken_grotesk_regular"/>
         </LinearLayout>
 
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"/>
     </LinearLayout>
-
-</LinearLayout>
+</ScrollView>

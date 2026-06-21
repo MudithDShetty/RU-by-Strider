@@ -1,82 +1,96 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
-    android:background="@drawable/bg_file_card"
-    android:layout_marginBottom="8dp"
-    android:padding="14dp"
+    android:background="@drawable/bg_result_row"
+    android:layout_marginBottom="10dp"
+    android:padding="13dp"
     android:gravity="center_vertical"
     android:clickable="true"
     android:focusable="true">
 
-    <!-- Extension badge -->
     <TextView
         android:id="@+id/tvExtension"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
         android:gravity="center"
-        android:text="TXT"
-        android:textSize="9sp"
+        android:text="PDF"
+        android:textSize="10sp"
         android:textStyle="bold"
-        android:textColor="@android:color/white"
-        android:background="@drawable/bg_ext_badge"
-        android:maxLines="1"
-        android:letterSpacing="0.04"/>
+        android:textColor="@color/ru_crimson"
+        android:background="@drawable/bg_result_thumb"
+        android:maxLines="1"/>
 
-    <!-- File info -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:orientation="vertical"
-        android:paddingStart="12dp"
+        android:paddingStart="13dp"
         android:paddingEnd="8dp">
 
         <TextView
             android:id="@+id/tvFileName"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="13sp"
-            android:fontFamily="sans-serif-medium"
+            android:textSize="15sp"
+            android:fontFamily="@font/hanken_grotesk_medium"
             android:textColor="@color/text_primary"
             android:maxLines="1"
             android:ellipsize="end"/>
 
-        <TextView
-            android:id="@+id/tvFilePath"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="11sp"
-            android:textColor="@color/text_hint"
-            android:maxLines="1"
-            android:ellipsize="middle"
-            android:paddingTop="2dp"/>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="3dp">
 
-        <TextView
-            android:id="@+id/tvFileSize"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="11sp"
-            android:textColor="@color/text_hint"
-            android:paddingTop="1dp"/>
+            <View
+                android:id="@+id/vSourceDot"
+                android:layout_width="7dp"
+                android:layout_height="7dp"
+                android:background="@drawable/bg_ext_badge"/>
 
+            <TextView
+                android:id="@+id/tvFileSub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:fontFamily="@font/hanken_grotesk_regular"
+                android:maxLines="1"
+                android:ellipsize="end"/>
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- Score badge -->
+    <ImageView
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:src="@drawable/ic_chevron_right"
+        app:tint="@color/text_hint"
+        android:contentDescription="@null"/>
+
     <TextView
         android:id="@+id/tvScore"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="82%"
-        android:textSize="11sp"
-        android:fontFamily="sans-serif-medium"
-        android:textColor="@color/ru_crimson"
-        android:background="@drawable/bg_score_badge"
-        android:paddingStart="7dp"
-        android:paddingEnd="7dp"
-        android:paddingTop="3dp"
-        android:paddingBottom="3dp"/>
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"/>
+
+    <TextView
+        android:id="@+id/tvFilePath"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"/>
+
+    <TextView
+        android:id="@+id/tvFileSize"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"/>
 
 </LinearLayout>

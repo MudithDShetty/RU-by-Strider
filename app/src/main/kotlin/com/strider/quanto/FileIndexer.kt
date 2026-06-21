@@ -1,6 +1,7 @@
 package com.strider.quanto
 
 import android.util.Log
+import com.strider.quanto.eval.EvalLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -165,9 +166,11 @@ class FileIndexer(
 
     suspend fun indexDirectory(
         rootPath: String,
+        source: String = "manual",
         onProgress: suspend (String) -> Unit,
         onFileIndexed: suspend (Int, Int, Int) -> Unit
     ) = withContext(Dispatchers.IO) {
+        val indexStartMs = System.currentTimeMillis()
 
         val root = File(rootPath)
         if (!root.exists() || !root.canRead()) {
@@ -300,6 +303,17 @@ class FileIndexer(
         loadFromDatabase()
         db.warmEmbeddingCache()
         Log.d(TAG, "Done — indexed:$indexedCount skipped:$skippedCount deleted:${deletedPaths.size} total:$size")
+        if (EvalLogger.enabled) {
+            EvalLogger.logIndexCompleted(
+                source = source,
+                indexedCount = indexedCount,
+                skippedCount = skippedCount,
+                deletedCount = deletedPaths.size,
+                totalFiles = size,
+                durationMs = System.currentTimeMillis() - indexStartMs,
+                categoryCounts = getBucketSizes()
+            )
+        }
     }
 
     /** Populate FTS keywords in batches — paths only, no full stub load into memory. */

@@ -162,7 +162,7 @@ object SearchDiagnosticsBuilder {
             )
         ).also {
             it.targetReport?.logToLogcat()
-            if (ResultsAdapter.HYBRID_DEV_MODE && !query.isNullOrBlank()) {
+            if (BuildConfig.DEBUG && !query.isNullOrBlank()) {
                 SearchEval.evaluate(query, candidatePaths, fusedPaths, results)?.let { golden ->
                     SearchEval.logEvaluation(golden)
                 }

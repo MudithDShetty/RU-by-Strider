@@ -23,7 +23,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.StriderQuanto"
-        android:largeHeap="true">
+        android:largeHeap="true"
+        android:forceDarkAllowed="false">
 
         <activity
             android:name=".MainActivity"

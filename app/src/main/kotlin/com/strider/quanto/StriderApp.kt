@@ -5,12 +5,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.util.Log
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.strider.quanto.eval.EvalLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,13 +52,18 @@ class StriderApp : Application() {
     @Volatile
     private var currentInitState = AppInitState(InitPhase.DB, "", -1)
 
+    private var lastInitPhase: InitPhase? = null
+    private var lastInitPhaseStartMs = 0L
+
     fun currentInitStateOrReady(): AppInitState = currentInitState
 
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         instance = this
+        EvalLogger.init(this)
         createNotificationChannel()
         startEngineInit()
     }
@@ -79,6 +86,16 @@ class StriderApp : Application() {
     }
 
     private fun reportProgress(phase: InitPhase, message: String, progress: Int) {
+        val now = System.currentTimeMillis()
+        val previousPhase = lastInitPhase
+        if (previousPhase != null && previousPhase != phase) {
+            logInitPhaseComplete(previousPhase, currentInitState.message, currentInitState.progress, now - lastInitPhaseStartMs)
+        }
+        if (previousPhase != phase) {
+            lastInitPhase = phase
+            lastInitPhaseStartMs = now
+        }
+
         val state = AppInitState(phase, message, progress)
         currentInitState = state
         synchronized(progressListeners) {
@@ -87,6 +104,22 @@ class StriderApp : Application() {
                 snapshot.forEach { it(state) }
             }
         }
+
+        if (phase == InitPhase.READY) {
+            logInitPhaseComplete(InitPhase.READY, message, progress, now - lastInitPhaseStartMs)
+        }
+    }
+
+    private fun logInitPhaseComplete(phase: InitPhase, message: String, progress: Int, durationMs: Long) {
+        if (!EvalLogger.enabled) return
+        EvalLogger.logInitPhase(
+            phase = phase.name,
+            message = message,
+            progress = progress,
+            durationMs = durationMs,
+            isFirstModelLoad = isFirstModelLoad,
+            indexFileCount = if (::indexer.isInitialized) indexer.size else 0
+        )
     }
 
     private fun startEngineInit() {
@@ -164,7 +197,7 @@ class StriderApp : Application() {
             return
         }
         val request = OneTimeWorkRequestBuilder<IndexingWorker>()
-            .setInputData(IndexingWorker.inputData(forceFull))
+            .setInputData(IndexingWorker.inputData(forceFull, source = "manual"))
             .addTag(IndexingWorker.WORK_TAG)
             .build()
 
@@ -182,7 +215,7 @@ class StriderApp : Application() {
             return
         }
         val request = PeriodicWorkRequestBuilder<IndexingWorker>(24, TimeUnit.HOURS)
-            .setInputData(IndexingWorker.inputData(forceFull = false))
+            .setInputData(IndexingWorker.inputData(forceFull = false, source = "periodic"))
             .setConstraints(
                 Constraints.Builder()
                     .setRequiresBatteryNotLow(true)

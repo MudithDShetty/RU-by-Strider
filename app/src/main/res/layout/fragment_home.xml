@@ -1,11 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout
+<androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/ru_bg">
 
-    <ScrollView
+    <!-- Results-mode top chrome (search bar moves here) -->
+    <LinearLayout
+        android:id="@+id/llResultsTop"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="8dp"
+        android:visibility="gone"
+        android:alpha="0"
+        android:elevation="12dp">
+
+        <TextView
+            android:id="@+id/tvResultsWordmark"
+            style="@style/RuText.ResultsWordmark"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <FrameLayout
+            android:id="@+id/flResultsSearchHost"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="13dp"/>
+    </LinearLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/svHome"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:fillViewport="true"
@@ -13,396 +41,446 @@
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:orientation="vertical"
-            android:paddingBottom="24dp">
+            android:minHeight="400dp">
 
-            <!-- Top bar -->
-            <LinearLayout
+            <Space
+                android:id="@+id/topSpacer"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:paddingStart="24dp"
-                android:paddingEnd="24dp"
-                android:paddingTop="16dp"
-                android:gravity="center_vertical">
+                android:layout_height="0dp"
+                android:layout_weight="1"/>
 
-                <TextView
-                    android:id="@+id/tvTime"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="9:41"
-                    android:textSize="13sp"
-                    android:fontFamily="sans-serif-medium"
-                    android:textColor="@color/text_primary"/>
-
-                <TextView
-                    android:id="@+id/btnIndexShortcut"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Index"
-                    android:textSize="12sp"
-                    android:textColor="@color/ru_crimson"
-                    android:fontFamily="sans-serif-medium"
-                    android:padding="6dp"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:background="?attr/selectableItemBackgroundBorderless"/>
-
-            </LinearLayout>
-
-            <!-- Center block -->
             <LinearLayout
+                android:id="@+id/llHeroBranding"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
-                android:paddingTop="48dp"
-                android:paddingStart="24dp"
-                android:paddingEnd="24dp">
+                android:paddingStart="@dimen/ru_content_padding_h"
+                android:paddingEnd="@dimen/ru_content_padding_h">
 
-                <!-- RU wordmark -->
                 <TextView
+                    android:id="@+id/tvHomeWordmark"
+                    style="@style/RuText.Wordmark"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="RU"
-                    android:textSize="72sp"
-                    android:fontFamily="serif"
-                    android:textStyle="bold"
-                    android:textColor="@color/ru_dark"
-                    android:letterSpacing="-0.05"
-                    android:lineSpacingMultiplier="1.0"/>
+                    android:layout_height="wrap_content"/>
 
-                <!-- Tagline -->
-                <TextView
-                    android:id="@+id/tvTagline"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/tagline_en"
-                    android:textSize="13sp"
-                    android:fontFamily="serif"
-                    android:textStyle="italic"
-                    android:textColor="@color/ru_crimson"
-                    android:layout_marginTop="4dp"
-                    android:layout_marginBottom="40dp"/>
-
-                <!-- Search bar -->
-                <LinearLayout
-                    android:id="@+id/llSearchBar"
+                <FrameLayout
                     android:layout_width="match_parent"
-                    android:layout_height="52dp"
-                    android:orientation="horizontal"
-                    android:background="@drawable/bg_search_bar"
-                    android:gravity="center_vertical"
-                    android:paddingStart="14dp"
-                    android:paddingEnd="8dp"
-                    android:clickable="true"
-                    android:focusable="true">
+                    android:layout_height="@dimen/home_tagline_height"
+                    android:layout_marginTop="@dimen/home_wordmark_tagline_gap"
+                    android:layout_marginBottom="@dimen/home_tagline_search_gap">
 
-                    <ImageView
-                        android:layout_width="18dp"
-                        android:layout_height="18dp"
-                        android:src="@drawable/ic_search"
-                        app:tint="@color/text_hint"
-                        xmlns:app="http://schemas.android.com/apk/res-auto"/>
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etSearch"
-                        android:layout_width="0dp"
+                    <TextView
+                        android:id="@+id/tvTaglineHi"
+                        android:layout_width="match_parent"
                         android:layout_height="match_parent"
-                        android:layout_weight="1"
-                        android:layout_marginStart="8dp"
-                        android:hint="@string/hint_search_en"
-                        android:textColorHint="@color/text_hint"
-                        android:textSize="14sp"
-                        android:textColor="@color/text_primary"
-                        android:background="@null"
-                        android:imeOptions="actionSearch"
-                        android:inputType="text"
-                        android:singleLine="true"/>
+                        android:gravity="center"
+                        android:text="@string/tagline_hi"
+                        android:textSize="21sp"
+                        android:textStyle="italic"
+                        android:textColor="@color/text_secondary"
+                        android:fontFamily="@font/tiro_devanagari_hindi_regular"/>
 
-                    <ImageButton
-                        android:id="@+id/btnMic"
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
-                        android:src="@drawable/ic_mic"
-                        android:background="@drawable/bg_mic_btn"
-                        android:padding="10dp"
-                        app:tint="@android:color/white"
-                        android:contentDescription="Voice search"
-                        xmlns:app="http://schemas.android.com/apk/res-auto"/>
+                    <TextView
+                        android:id="@+id/tvTaglineEn"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:text="@string/tagline_en"
+                        android:textSize="20sp"
+                        android:textStyle="italic"
+                        android:textColor="@color/text_secondary"
+                        android:fontFamily="@font/fraunces_semibold"
+                        android:alpha="0"/>
+                </FrameLayout>
+            </LinearLayout>
 
-                </LinearLayout>
+            <LinearLayout
+                android:id="@+id/llSearchBlock"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:paddingStart="@dimen/ru_content_padding_h"
+                android:paddingEnd="@dimen/ru_content_padding_h">
 
-                <!-- Debug: track expected file rank (dev builds) -->
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/etDebugTarget"
+                <FrameLayout
+                    android:id="@+id/flIdleSearchHost"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:hint="@string/hint_debug_target"
-                    android:textColorHint="@color/text_hint"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_secondary"
-                    android:background="@drawable/bg_search_bar"
-                    android:paddingStart="14dp"
-                    android:paddingEnd="14dp"
-                    android:paddingTop="10dp"
-                    android:paddingBottom="10dp"
-                    android:imeOptions="actionDone"
-                    android:inputType="text"
-                    android:singleLine="true"
-                    android:visibility="gone"/>
-
-                <!-- Category filter chips -->
-                <HorizontalScrollView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:scrollbars="none"
-                    android:layout_marginTop="16dp">
+                    android:layout_height="wrap_content">
 
                     <LinearLayout
-                        android:id="@+id/llChips"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
+                        android:id="@+id/llSearchBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/home_search_height"
                         android:orientation="horizontal"
+                        android:background="@drawable/bg_search_bar"
                         android:gravity="center_vertical"
-                        android:paddingEnd="8dp">
+                        android:paddingStart="22dp"
+                        android:paddingEnd="8dp"
+                        android:elevation="2dp"
+                        android:clickable="true"
+                        android:focusable="false"
+                        android:descendantFocusability="afterDescendants">
 
-                        <TextView
-                            android:id="@+id/chipAll"
-                            android:layout_width="wrap_content"
-                            android:layout_height="34dp"
-                            android:text="All"
-                            android:textSize="12sp"
-                            android:textColor="@android:color/white"
-                            android:fontFamily="sans-serif-medium"
-                            android:gravity="center"
-                            android:paddingStart="14dp"
-                            android:paddingEnd="14dp"
-                            android:background="@drawable/bg_category_chip_selected"
-                            android:clickable="true"
-                            android:focusable="true"/>
+                        <ImageView
+                            android:layout_width="22dp"
+                            android:layout_height="22dp"
+                            android:src="@drawable/ic_search"
+                            app:tint="@color/text_secondary"
+                            android:contentDescription="@null"/>
 
-                        <TextView
-                            android:id="@+id/chipDocs"
-                            android:layout_width="wrap_content"
-                            android:layout_height="34dp"
-                            android:text="Docs"
-                            android:textSize="12sp"
-                            android:textColor="@color/text_secondary"
-                            android:gravity="center"
-                            android:paddingStart="14dp"
-                            android:paddingEnd="14dp"
-                            android:layout_marginStart="8dp"
-                            android:background="@drawable/bg_category_chip"
-                            android:clickable="true"
-                            android:focusable="true"/>
+                        <FrameLayout
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:layout_marginStart="10dp"
+                            android:layout_marginEnd="8dp">
 
-                        <TextView
-                            android:id="@+id/chipMedia"
-                            android:layout_width="wrap_content"
-                            android:layout_height="34dp"
-                            android:text="Media"
-                            android:textSize="12sp"
-                            android:textColor="@color/text_secondary"
-                            android:gravity="center"
-                            android:paddingStart="14dp"
-                            android:paddingEnd="14dp"
-                            android:layout_marginStart="8dp"
-                            android:background="@drawable/bg_category_chip"
-                            android:clickable="true"
-                            android:focusable="true"/>
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/etSearch"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:hint="@string/hint_search_en"
+                                android:textColorHint="@color/text_secondary"
+                                android:textSize="17sp"
+                                android:fontFamily="@font/hanken_grotesk_regular"
+                                android:textColor="@color/text_primary"
+                                android:background="@null"
+                                android:imeOptions="actionSearch"
+                                android:inputType="text"
+                                android:singleLine="true"
+                                android:focusable="true"
+                                android:focusableInTouchMode="true"
+                                android:cursorVisible="true"/>
 
-                        <TextView
-                            android:id="@+id/chipWork"
-                            android:layout_width="wrap_content"
-                            android:layout_height="34dp"
-                            android:text="Work"
-                            android:textSize="12sp"
-                            android:textColor="@color/text_secondary"
-                            android:gravity="center"
-                            android:paddingStart="14dp"
-                            android:paddingEnd="14dp"
-                            android:layout_marginStart="8dp"
-                            android:background="@drawable/bg_category_chip"
-                            android:clickable="true"
-                            android:focusable="true"/>
+                            <LinearLayout
+                                android:id="@+id/llVoiceEq"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:orientation="horizontal"
+                                android:gravity="center_vertical"
+                                android:visibility="gone">
 
-                        <TextView
-                            android:id="@+id/chipId"
-                            android:layout_width="wrap_content"
-                            android:layout_height="34dp"
-                            android:text="ID"
-                            android:textSize="12sp"
-                            android:textColor="@color/text_secondary"
-                            android:gravity="center"
-                            android:paddingStart="14dp"
-                            android:paddingEnd="14dp"
-                            android:layout_marginStart="8dp"
-                            android:background="@drawable/bg_category_chip"
-                            android:clickable="true"
-                            android:focusable="true"/>
+                                <View android:layout_width="3.5dp" android:layout_height="12dp" android:background="@color/ru_crimson"/>
+                                <View android:layout_width="3.5dp" android:layout_height="26dp" android:layout_marginStart="4dp" android:background="@color/ru_crimson"/>
+                                <View android:layout_width="3.5dp" android:layout_height="18dp" android:layout_marginStart="4dp" android:background="@color/ru_crimson"/>
+                                <View android:layout_width="3.5dp" android:layout_height="32dp" android:layout_marginStart="4dp" android:background="@color/ru_crimson"/>
+                                <View android:layout_width="3.5dp" android:layout_height="14dp" android:layout_marginStart="4dp" android:background="@color/ru_crimson"/>
+                                <View android:layout_width="3.5dp" android:layout_height="22dp" android:layout_marginStart="4dp" android:background="@color/ru_crimson"/>
+                                <View android:layout_width="3.5dp" android:layout_height="10dp" android:layout_marginStart="4dp" android:background="@color/ru_crimson"/>
+                            </LinearLayout>
+                        </FrameLayout>
 
+                        <ImageButton
+                            android:id="@+id/btnClearSearch"
+                            android:layout_width="30dp"
+                            android:layout_height="30dp"
+                            android:layout_marginEnd="4dp"
+                            android:src="@drawable/ic_close"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:padding="5dp"
+                            app:tint="@color/text_secondary"
+                            android:visibility="gone"
+                            android:contentDescription="@string/results_clear"/>
+
+                        <!-- Mic and enter share one slot — toggled in MainActivity -->
+                        <FrameLayout
+                            android:id="@+id/flSearchAction"
+                            android:layout_width="@dimen/home_mic_size"
+                            android:layout_height="@dimen/home_mic_size"
+                            android:layout_marginEnd="6dp">
+
+                            <ImageButton
+                                android:id="@+id/btnSearch"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:src="@drawable/ic_enter"
+                                android:background="@drawable/bg_mic_btn"
+                                android:padding="12dp"
+                                app:tint="@android:color/white"
+                                android:visibility="gone"
+                                android:contentDescription="@string/btn_search"/>
+
+                            <FrameLayout
+                                android:id="@+id/flMicWrap"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent">
+
+                                <View
+                                    android:id="@+id/vMicBreathe"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:background="@drawable/bg_mic_breathe"/>
+
+                                <View
+                                    android:id="@+id/vMicRing1"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:background="@drawable/bg_mic_ring"
+                                    android:alpha="0"
+                                    android:visibility="gone"/>
+
+                                <View
+                                    android:id="@+id/vMicRing2"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:background="@drawable/bg_mic_ring"
+                                    android:alpha="0"
+                                    android:visibility="gone"/>
+
+                                <ImageButton
+                                    android:id="@+id/btnMic"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:src="@drawable/ic_mic"
+                                    android:background="@drawable/bg_mic_btn"
+                                    android:padding="14dp"
+                                    app:tint="@android:color/white"
+                                    android:contentDescription="@string/settings_voice"/>
+                            </FrameLayout>
+                        </FrameLayout>
                     </LinearLayout>
-                </HorizontalScrollView>
+                </FrameLayout>
 
-            </LinearLayout>
-
-            <!-- Share picker — shown when a send/share query matches files -->
-            <LinearLayout
-                android:id="@+id/llSharePicker"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_marginStart="24dp"
-                android:layout_marginEnd="24dp"
-                android:layout_marginTop="24dp"
-                android:padding="16dp"
-                android:background="@drawable/bg_share_picker"
-                android:visibility="gone">
-
-                <TextView
-                    android:id="@+id/tvSharePickerLabel"
+                <FrameLayout
+                    android:id="@+id/llSearchHelper"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/share_picker_title"
-                    android:textSize="12sp"
-                    android:fontFamily="sans-serif-medium"
-                    android:textColor="@color/ru_crimson"/>
-
-                <TextView
-                    android:id="@+id/tvSharePickerFile"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:textSize="14sp"
-                    android:fontFamily="sans-serif-medium"
-                    android:textColor="@color/text_primary"
-                    android:maxLines="2"
-                    android:ellipsize="end"/>
-
-                <TextView
-                    android:id="@+id/tvSharePickerPosition"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary"/>
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:layout_marginTop="14dp"
-                    android:gravity="end">
+                    android:layout_height="@dimen/home_helper_height"
+                    android:layout_marginTop="@dimen/home_helper_margin_top">
 
                     <TextView
-                        android:id="@+id/btnShareCancel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="40dp"
+                        android:id="@+id/tvSearchHintIdle"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
                         android:gravity="center"
-                        android:text="@string/share_picker_cancel"
-                        android:textSize="13sp"
+                        android:text="@string/search_mic_hint_idle"
+                        android:textSize="13.5sp"
                         android:textColor="@color/text_secondary"
-                        android:fontFamily="sans-serif-medium"
-                        android:paddingStart="14dp"
-                        android:paddingEnd="14dp"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:background="?attr/selectableItemBackgroundBorderless"/>
+                        android:fontFamily="@font/hanken_grotesk_regular"/>
 
-                    <TextView
-                        android:id="@+id/btnShareNext"
-                        android:layout_width="wrap_content"
-                        android:layout_height="40dp"
+                    <LinearLayout
+                        android:id="@+id/tvSearchHintLive"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
                         android:gravity="center"
-                        android:text="@string/share_picker_next"
-                        android:textSize="13sp"
-                        android:textColor="@color/ru_crimson"
-                        android:fontFamily="sans-serif-medium"
-                        android:paddingStart="16dp"
-                        android:paddingEnd="16dp"
-                        android:layout_marginStart="8dp"
-                        android:background="@drawable/bg_btn_secondary"
-                        android:clickable="true"
-                        android:focusable="true"/>
+                        android:orientation="horizontal"
+                        android:alpha="0">
 
-                    <TextView
-                        android:id="@+id/btnShareConfirm"
-                        android:layout_width="wrap_content"
-                        android:layout_height="40dp"
-                        android:gravity="center"
-                        android:text="@string/share_picker_send"
-                        android:textSize="13sp"
-                        android:textColor="@android:color/white"
-                        android:fontFamily="sans-serif-medium"
-                        android:paddingStart="18dp"
-                        android:paddingEnd="18dp"
-                        android:layout_marginStart="8dp"
-                        android:background="@drawable/bg_btn_primary"
-                        android:clickable="true"
-                        android:focusable="true"/>
+                        <View
+                            android:id="@+id/vHintLiveDot"
+                            android:layout_width="7dp"
+                            android:layout_height="7dp"
+                            android:background="@drawable/bg_hint_live_dot"/>
 
-                </LinearLayout>
-
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="7dp"
+                            android:text="@string/search_mic_hint_listening"
+                            android:textSize="13.5sp"
+                            android:textColor="@color/ru_crimson"
+                            android:fontFamily="@font/hanken_grotesk_medium"/>
+                    </LinearLayout>
+                </FrameLayout>
             </LinearLayout>
 
-            <!-- Recent section -->
-            <LinearLayout
+            <Space
+                android:id="@+id/bottomSpacer"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"/>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- Results panel — positioned below search chrome in code -->
+    <LinearLayout
+        android:id="@+id/resultsSheet"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@drawable/bg_results_sheet"
+        android:visibility="gone"
+        android:elevation="8dp">
+
+        <LinearLayout
+            android:id="@+id/llSheetDragZone"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:clickable="true"
+            android:focusable="true">
+
+            <View
+                android:id="@+id/vSheetHandle"
+                android:layout_width="42dp"
+                android:layout_height="5dp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="9dp"
+                android:background="@drawable/bg_sheet_handle"/>
+
+            <TextView
+                android:id="@+id/tvResultsCount"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
                 android:paddingStart="24dp"
                 android:paddingEnd="24dp"
-                android:paddingTop="32dp">
+                android:paddingTop="13dp"
+                android:paddingBottom="8dp"
+                android:textSize="20sp"
+                android:fontFamily="@font/fraunces_semibold"
+                android:textColor="@color/text_primary"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/llSharePicker"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="6dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:background="@drawable/bg_share_picker"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tvSharePickerLabel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/share_picker_title"
+                        android:textSize="11sp"
+                        android:fontFamily="@font/hanken_grotesk_medium"
+                        android:textColor="@color/ru_crimson"/>
+
+                    <TextView
+                        android:id="@+id/tvSharePickerFile"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textSize="14sp"
+                        android:fontFamily="@font/hanken_grotesk_medium"
+                        android:textColor="@color/text_primary"
+                        android:maxLines="1"
+                        android:ellipsize="end"/>
+
+                    <TextView
+                        android:id="@+id/tvSharePickerPosition"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textSize="11sp"
+                        android:textColor="@color/text_secondary"/>
+                </LinearLayout>
 
                 <TextView
+                    android:id="@+id/btnShareCancel"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/recent"
-                    android:textSize="10sp"
-                    android:fontFamily="sans-serif-medium"
-                    android:textColor="@color/text_hint"
-                    android:letterSpacing="0.08"
-                    android:layout_marginBottom="10dp"/>
-
-                <!-- Results list / recent list -->
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/rvResults"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:nestedScrollingEnabled="false"
-                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
-                    xmlns:app="http://schemas.android.com/apk/res-auto"/>
-
-                <!-- Status text -->
-                <TextView
-                    android:id="@+id/tvStatus"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/status_loading"
+                    android:layout_height="36dp"
+                    android:gravity="center"
+                    android:text="@string/share_picker_cancel"
                     android:textSize="12sp"
                     android:textColor="@color/text_secondary"
+                    android:fontFamily="@font/hanken_grotesk_medium"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="?attr/selectableItemBackgroundBorderless"/>
+
+                <TextView
+                    android:id="@+id/btnShareNext"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
                     android:gravity="center"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="8dp"/>
+                    android:text="@string/share_picker_next"
+                    android:textSize="12sp"
+                    android:textColor="@color/ru_crimson"
+                    android:fontFamily="@font/hanken_grotesk_medium"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_btn_secondary"
+                    android:clickable="true"
+                    android:focusable="true"/>
 
-                <!-- Horizontal progress bar -->
-                <ProgressBar
-                    android:id="@+id/progressBar"
-                    style="?android:attr/progressBarStyleHorizontal"
-                    android:layout_width="match_parent"
-                    android:layout_height="3dp"
-                    android:indeterminate="true"
-                    android:indeterminateTint="@color/ru_crimson"
-                    android:visibility="visible"
-                    android:layout_marginTop="4dp"/>
-
+                <TextView
+                    android:id="@+id/btnShareConfirm"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:gravity="center"
+                    android:text="@string/share_picker_send"
+                    android:textSize="12sp"
+                    android:textColor="@android:color/white"
+                    android:fontFamily="@font/hanken_grotesk_medium"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_btn_primary"
+                    android:clickable="true"
+                    android:focusable="true"/>
             </LinearLayout>
-
         </LinearLayout>
-    </ScrollView>
 
-</FrameLayout>
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvResults"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="24dp"
+            android:clipToPadding="false"
+            android:overScrollMode="never"
+            android:focusable="false"
+            android:focusableInTouchMode="false"
+            app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"/>
+
+        <TextView
+            android:id="@+id/tvResultsEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:padding="40dp"
+            android:textSize="14sp"
+            android:textColor="@color/text_secondary"
+            android:fontFamily="@font/hanken_grotesk_regular"
+            android:visibility="gone"/>
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:fontFamily="@font/hanken_grotesk_regular"
+            android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingBottom="8dp"
+            android:visibility="gone"/>
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"/>
+    </LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

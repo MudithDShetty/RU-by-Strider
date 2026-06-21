@@ -13,6 +13,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.strider.quanto.eval.EvalLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -24,6 +25,8 @@ class IndexingWorker(
 
     override suspend fun doWork(): ListenableWorker.Result = withContext(Dispatchers.IO) {
         val app = applicationContext as StriderApp
+        val source = inputData.getString(KEY_SOURCE) ?: "workmanager"
+        if (EvalLogger.enabled) EvalLogger.logIndexWorker("started")
 
         // Model load can take several minutes on first install or after Android kills the process.
         if (!app.isEngineReady || !app.isCoreInitialized) {
@@ -40,6 +43,9 @@ class IndexingWorker(
                 waitedMs += WAIT_POLL_MS
             }
             if (!app.isEngineReady || !app.isCoreInitialized) {
+                if (EvalLogger.enabled) {
+                    EvalLogger.logIndexWorker("retry", waitForModelMs = waitedMs)
+                }
                 setProgress(
                     workDataOf(
                         KEY_STATUS to "AI model not ready yet — will retry",
@@ -63,6 +69,7 @@ class IndexingWorker(
         try {
             app.indexer.indexDirectory(
                 rootPath = rootPath,
+                source = source,
                 onProgress = { msg ->
                     setProgress(
                         workDataOf(
@@ -88,6 +95,10 @@ class IndexingWorker(
 
             app.indexer.loadFromDatabase()
 
+            if (EvalLogger.enabled) {
+                EvalLogger.logIndexWorker("success", totalFiles = app.indexer.size)
+            }
+
             setProgress(
                 workDataOf(
                     KEY_STATUS to "✓ Index complete",
@@ -104,6 +115,9 @@ class IndexingWorker(
                 )
             )
         } catch (e: Exception) {
+            if (EvalLogger.enabled) {
+                EvalLogger.logIndexWorker("failure", error = e.message)
+            }
             setProgress(
                 workDataOf(
                     KEY_STATUS to "Index failed: ${e.message}",
@@ -167,6 +181,7 @@ class IndexingWorker(
         const val KEY_TOTAL = "total"
         const val KEY_DONE = "done"
         const val KEY_FORCE_FULL = "force_full"
+        const val KEY_SOURCE = "source"
         const val KEY_PHASE = "phase"
 
         const val PHASE_WAITING_MODEL = "waiting_model"
@@ -180,6 +195,7 @@ class IndexingWorker(
         private const val WAIT_POLL_MS = 1000L
         private const val NOTIFICATION_ID = 1001
 
-        fun inputData(forceFull: Boolean): Data = workDataOf(KEY_FORCE_FULL to forceFull)
+        fun inputData(forceFull: Boolean, source: String = "workmanager"): Data =
+            workDataOf(KEY_FORCE_FULL to forceFull, KEY_SOURCE to source)
     }
 }

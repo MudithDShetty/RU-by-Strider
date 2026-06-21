@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_settings_card"
+    android:layout_marginBottom="8dp"
+    android:elevation="2dp"
+    android:padding="14dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tvEventBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="9sp"
+            android:fontFamily="@font/hanken_grotesk_semibold"
+            android:textColor="@color/ru_crimson"
+            android:background="@drawable/bg_bucket_chip"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"/>
+
+        <TextView
+            android:id="@+id/tvEventTime"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:gravity="end"
+            android:textSize="10sp"
+            android:textColor="@color/text_hint"
+            android:fontFamily="@font/hanken_grotesk_regular"/>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvEventSummary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:textSize="13sp"
+        android:fontFamily="@font/hanken_grotesk_medium"
+        android:textColor="@color/text_primary"/>
+
+    <TextView
+        android:id="@+id/tvEventDetail"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textSize="11sp"
+        android:textColor="@color/text_secondary"
+        android:lineSpacingExtra="2dp"
+        android:fontFamily="monospace"/>
+
+</LinearLayout>

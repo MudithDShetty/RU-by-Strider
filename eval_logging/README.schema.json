@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "description": "RU eval analytics — NDJSON events written to on-device filesDir/ru_eval/events/*.jsonl",
+  "export": "adb pull /data/data/com.strider.quanto/files/ru_eval ./analytics_data",
+  "events": {
+    "search_completed": {
+      "file": "events/search_YYYY-MM-DD.jsonl",
+      "fields": ["event_id", "query", "context", "retrieval", "results", "timing_ms", "debug_target", "golden_eval"]
+    },
+    "index_completed": {
+      "file": "events/index_YYYY-MM-DD.jsonl",
+      "fields": ["source", "indexed_count", "skipped_count", "deleted_count", "total_files", "duration_ms", "category_counts"]
+    },
+    "index_worker": {
+      "file": "events/index_YYYY-MM-DD.jsonl",
+      "fields": ["status", "wait_for_model_ms", "total_files", "error"]
+    },
+    "init_phase": {
+      "file": "events/init_YYYY-MM-DD.jsonl",
+      "fields": ["phase", "message", "progress", "duration_ms", "is_first_model_load", "index_file_count"]
+    },
+    "result_clicked": {
+      "file": "events/search_YYYY-MM-DD.jsonl",
+      "fields": ["query", "clicked_rank", "clicked_path", "top1_path"]
+    }
+  }
+}
