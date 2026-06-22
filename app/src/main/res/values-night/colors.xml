@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Ink theme — design handoff data-theme="ink" -->
+    <color name="ru_bg">#08080A</color>
+    <color name="ru_crimson">#E8455C</color>
+    <color name="ru_crimson_light">#2A1518</color>
+    <color name="ru_dark">#151418</color>
+    <color name="ru_amber">#BD9F5A</color>
+
+    <color name="text_primary">#F4F1EA</color>
+    <color name="text_secondary">#80F4F1EA</color>
+    <color name="text_hint">#66F4F1EA</color>
+
+    <color name="surface">#E0151418</color>
+    <color name="surface_solid">#151418</color>
+    <color name="divider">#17FFFFFF</color>
+
+    <color name="ru_search_bar_fill">#151418</color>
+    <color name="ru_search_bar_shadow">#66000000</color>
+    <color name="ru_nav_bar_fill">#E0151418</color>
+    <color name="ru_loading_scrim">#CC08080A</color>
+    <color name="ru_skeleton_fill">#18FFFFFF</color>
+    <color name="ru_mic_breathe">#26E8455C</color>
+    <color name="ru_focus_ring">#38E8455C</color>
+    <color name="ru_settings_icon_bg">#0FFFFFFF</color>
+    <color name="ru_init_banner">#151418</color>
+    <color name="ru_theme_toggle_shadow">#40000000</color>
+    <color name="theme_toggle_icon_inactive">#A3F4F1EA</color>
+    <color name="theme_toggle_track">#1FFFFFFF</color>
+    <color name="theme_toggle_thumb">#3A3548</color>
+    <color name="theme_toggle_icon_active">#FFFFFF</color>
+    <color name="ru_chip_fill">#0FFFFFFF</color>
+    <color name="ru_result_row_shadow">#40000000</color>
+    <color name="ru_crimson_accent_deep">#C73048</color>
+
+    <color name="badge_bg">#2A1518</color>
+    <color name="badge_text">#E8455C</color>
+</resources>

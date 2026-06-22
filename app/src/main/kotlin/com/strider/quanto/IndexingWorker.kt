@@ -67,9 +67,15 @@ class IndexingWorker(
         setForeground(buildForegroundInfo(0, "Starting indexer…"))
 
         try {
-            app.indexer.indexDirectory(
+            val scanDocumentText = applicationContext.getSharedPreferences(
+                StriderApp.PREFS_NAME,
+                android.content.Context.MODE_PRIVATE
+            ).getBoolean(StriderApp.PREF_SCAN_DOCUMENT_TEXT, true)
+
+            val result = app.indexer.indexDirectory(
                 rootPath = rootPath,
                 source = source,
+                scanDocumentText = scanDocumentText,
                 onProgress = { msg ->
                     setProgress(
                         workDataOf(
@@ -93,7 +99,9 @@ class IndexingWorker(
                 }
             )
 
-            app.indexer.loadFromDatabase()
+            if (result.ocrPendingCount > 0 && scanDocumentText) {
+                app.enqueueOcrIndexing()
+            }
 
             if (EvalLogger.enabled) {
                 EvalLogger.logIndexWorker("success", totalFiles = app.indexer.size)

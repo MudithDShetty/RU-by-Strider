@@ -15,12 +15,16 @@ object GraniteReranker {
         lexicalScores: Map<String, Float>,
         lexicalRankMap: Map<String, Int>,
         denseRankMap: Map<String, Int>,
-        engine: EmbeddingEngine
+        engine: EmbeddingEngine,
+        queryEmbedding: FloatArray? = null,
+        denseScores: Map<String, Float>? = null
     ): List<SearchResult> {
         if (candidates.isEmpty()) return emptyList()
 
-        engine.prepareForSearch()
-        val queryEmb = engine.embed(query.cleanQueryForEmbedding)
+        val queryEmb = queryEmbedding ?: run {
+            engine.prepareForSearch()
+            engine.embed(query.cleanQueryForEmbedding)
+        }
         val maxLex = lexicalScores.values.maxOrNull()?.coerceAtLeast(1f) ?: 1f
         val queryTokens = if (query.lexicalTokens.isNotEmpty()) {
             query.lexicalTokens
@@ -34,7 +38,8 @@ object GraniteReranker {
         }
 
         val results = candidates.map { file ->
-            val dense = engine.cosineSimilarity(queryEmb, file.embedding)
+            val dense = denseScores?.get(file.path)
+                ?: engine.cosineSimilarity(queryEmb, file.embedding)
             val lexNorm = (lexicalScores[file.path] ?: 0f) / maxLex
             val nameNorm = QueryScoring.filenameStem(file.name)
             val filenameQueryMatch = QueryScoring.queryMatchesFilenameStem(nameNorm, coreTokens)
@@ -132,7 +137,7 @@ object GraniteReranker {
      */
     fun takeTop(results: List<SearchResult>, query: EnrichedQuery, topK: Int): List<SearchResult> {
         if (results.isEmpty() || topK <= 0) return emptyList()
-        val sorted = results.sortedByDescending { it.score }
+        val sorted = results
         val coreTokens = query.coreTokens.ifEmpty {
             MultilingualBridge.coreTokens(query.cleanQueryForEmbedding)
         }

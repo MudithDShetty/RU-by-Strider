@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.StriderQuanto" parent="Theme.MaterialComponents.Light.NoActionBar">
+    <style name="Theme.StriderQuanto" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/ru_crimson</item>
         <item name="colorPrimaryVariant">@color/ru_dark</item>
         <item name="colorOnPrimary">@android:color/white</item>

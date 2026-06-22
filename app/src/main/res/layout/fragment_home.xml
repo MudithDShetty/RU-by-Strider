@@ -6,6 +6,59 @@
     android:layout_height="match_parent"
     android:background="@color/ru_bg">
 
+    <!-- Theme toggle — top-left on idle home (hidden during results) -->
+    <FrameLayout
+        android:id="@+id/themeToggleWrap"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:paddingStart="20dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="20dp"
+        android:elevation="8dp">
+
+        <FrameLayout
+            android:id="@+id/themeToggle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_theme_toggle"
+            android:padding="@dimen/ru_theme_toggle_pad">
+
+            <View
+                android:id="@+id/themeToggleThumb"
+                android:layout_width="@dimen/ru_theme_toggle_btn_w"
+                android:layout_height="@dimen/ru_theme_toggle_btn_h"
+                android:background="@drawable/bg_theme_toggle_thumb"/>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:elevation="4dp">
+
+                <ImageButton
+                    android:id="@+id/btnThemeLight"
+                    android:layout_width="@dimen/ru_theme_toggle_btn_w"
+                    android:layout_height="@dimen/ru_theme_toggle_btn_h"
+                    android:background="@android:color/transparent"
+                    android:src="@drawable/ic_theme_sun"
+                    android:scaleType="centerInside"
+                    android:padding="3dp"
+                    android:contentDescription="@string/theme_light"/>
+
+                <ImageButton
+                    android:id="@+id/btnThemeDark"
+                    android:layout_width="@dimen/ru_theme_toggle_btn_w"
+                    android:layout_height="@dimen/ru_theme_toggle_btn_h"
+                    android:background="@android:color/transparent"
+                    android:src="@drawable/ic_theme_ink"
+                    android:scaleType="centerInside"
+                    android:padding="3dp"
+                    android:contentDescription="@string/theme_dark"/>
+            </LinearLayout>
+        </FrameLayout>
+    </FrameLayout>
+
     <!-- Results-mode top chrome (search bar moves here) -->
     <LinearLayout
         android:id="@+id/llResultsTop"
@@ -109,7 +162,10 @@
                 <FrameLayout
                     android:id="@+id/flIdleSearchHost"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
+                    android:layout_height="wrap_content"
+                    android:clipChildren="false"
+                    android:clipToPadding="false"
+                    android:paddingBottom="4dp">
 
                     <LinearLayout
                         android:id="@+id/llSearchBar"
@@ -120,14 +176,15 @@
                         android:gravity="center_vertical"
                         android:paddingStart="22dp"
                         android:paddingEnd="8dp"
-                        android:elevation="2dp"
+                        android:elevation="4dp"
                         android:clickable="true"
                         android:focusable="false"
                         android:descendantFocusability="afterDescendants">
 
                         <ImageView
-                            android:layout_width="22dp"
-                            android:layout_height="22dp"
+                            android:layout_width="@dimen/ru_search_glyph_size"
+                            android:layout_height="@dimen/ru_search_glyph_size"
+                            android:scaleType="centerInside"
                             android:src="@drawable/ic_search"
                             app:tint="@color/text_secondary"
                             android:contentDescription="@null"/>
@@ -237,7 +294,8 @@
                                     android:layout_height="match_parent"
                                     android:src="@drawable/ic_mic"
                                     android:background="@drawable/bg_mic_btn"
-                                    android:padding="14dp"
+                                    android:padding="13dp"
+                                    android:scaleType="centerInside"
                                     app:tint="@android:color/white"
                                     android:contentDescription="@string/settings_voice"/>
                             </FrameLayout>

@@ -111,7 +111,6 @@ class MainActivity : AppCompatActivity() {
     private val dialAnimHandler = Handler(Looper.getMainLooper())
     private val toastHandler = Handler(Looper.getMainLooper())
     private var toastHideRunnable: Runnable? = null
-    private val maxFilesOptions = intArrayOf(1_000, 2_000, 5_000, 10_000)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -122,7 +121,7 @@ class MainActivity : AppCompatActivity() {
         PDFBoxResourceLoader.init(applicationContext)
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        voiceSearchManager = VoiceSearchManager(this, voiceSearchCallbacks)
+        voiceSearchManager = VoiceSearchManager(applicationContext, voiceSearchCallbacks)
 
         inflateScreens()
         applyShellWordmarks()
@@ -270,6 +269,10 @@ class MainActivity : AppCompatActivity() {
                 navHiddenForResults = false
                 binding.llNavBar.visibility = View.VISIBLE
                 binding.llNavBar.alpha = 1f
+                if (::homeBinding.isInitialized) {
+                    homeBinding.themeToggleWrap.visibility = View.VISIBLE
+                    homeBinding.themeToggleWrap.alpha = 1f
+                }
             }
             return
         }
@@ -277,6 +280,8 @@ class MainActivity : AppCompatActivity() {
         navHiddenForResults = hide
         val duration = uiAnimDuration(300L)
         binding.llNavBar.animate().cancel()
+        val toggleWrap = if (::homeBinding.isInitialized) homeBinding.themeToggleWrap else null
+        toggleWrap?.animate()?.cancel()
         if (hide) {
             if (animated && duration > 0L) {
                 binding.llNavBar.animate()
@@ -284,17 +289,28 @@ class MainActivity : AppCompatActivity() {
                     .setDuration(duration)
                     .withEndAction { binding.llNavBar.visibility = View.GONE }
                     .start()
+                toggleWrap?.animate()
+                    ?.alpha(0f)
+                    ?.setDuration(duration)
+                    ?.withEndAction { toggleWrap.visibility = View.GONE }
+                    ?.start()
             } else {
                 binding.llNavBar.visibility = View.GONE
                 binding.llNavBar.alpha = 0f
+                toggleWrap?.visibility = View.GONE
+                toggleWrap?.alpha = 0f
             }
         } else {
             binding.llNavBar.visibility = View.VISIBLE
+            toggleWrap?.visibility = View.VISIBLE
             if (animated && duration > 0L) {
                 binding.llNavBar.alpha = 0f
                 binding.llNavBar.animate().alpha(1f).setDuration(duration).start()
+                toggleWrap?.alpha = 0f
+                toggleWrap?.animate()?.alpha(1f)?.setDuration(duration)?.start()
             } else {
                 binding.llNavBar.alpha = 1f
+                toggleWrap?.alpha = 1f
             }
         }
     }
@@ -303,8 +319,50 @@ class MainActivity : AppCompatActivity() {
     // Home screen setup
     // ─────────────────────────────────────────────
 
+    private fun setupThemeToggle() {
+        updateThemeToggleUi(RuTheme.isDarkMode(this), animated = false)
+        homeBinding.btnThemeLight.setOnClickListener {
+            if (!RuTheme.isDarkMode(this)) return@setOnClickListener
+            RuTheme.setDarkMode(this, false)
+        }
+        homeBinding.btnThemeDark.setOnClickListener {
+            if (RuTheme.isDarkMode(this)) return@setOnClickListener
+            RuTheme.setDarkMode(this, true)
+        }
+    }
+
+    private fun updateThemeToggleUi(dark: Boolean, animated: Boolean) {
+        if (!::homeBinding.isInitialized) return
+        homeBinding.btnThemeLight.isSelected = !dark
+        homeBinding.btnThemeDark.isSelected = dark
+
+        val active = ContextCompat.getColor(this, R.color.theme_toggle_icon_active)
+        val inactive = ContextCompat.getColor(this, R.color.theme_toggle_icon_inactive)
+        homeBinding.btnThemeLight.setColorFilter(if (!dark) active else inactive)
+        homeBinding.btnThemeDark.setColorFilter(if (dark) active else inactive)
+        homeBinding.btnThemeLight.alpha = if (!dark) 1f else 0.72f
+        homeBinding.btnThemeDark.alpha = if (dark) 1f else 0.72f
+
+        val offset = if (dark) {
+            resources.getDimension(R.dimen.ru_theme_toggle_btn_w)
+        } else {
+            0f
+        }
+        homeBinding.themeToggleThumb.animate().cancel()
+        if (animated) {
+            homeBinding.themeToggleThumb.animate()
+                .translationX(offset)
+                .setDuration(uiAnimDuration(420L))
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .start()
+        } else {
+            homeBinding.themeToggleThumb.translationX = offset
+        }
+    }
+
     private fun setupHomeScreen() {
         skeletonAdapter = SkeletonResultsAdapter()
+        setupThemeToggle()
         homeResultsUi = HomeResultsUi(
             binding = homeBinding,
             skeletonAdapter = skeletonAdapter,
@@ -557,11 +615,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSettingsScreen() {
         refreshYourNameRow()
-        refreshMaxFilesRow()
 
         settingsBinding.rowYourName.apply {
             tvRowTitle.text = getString(R.string.settings_your_name)
-            ivRowIcon.setImageResource(R.drawable.ic_search)
+            ivRowIcon.setImageResource(R.drawable.ic_user)
             ivChevron.visibility = View.VISIBLE
             switchRow.visibility = View.GONE
             root.setOnClickListener { showOnboardingOverlay(isFirstRun = false) }
@@ -570,7 +627,7 @@ class MainActivity : AppCompatActivity() {
         settingsBinding.rowSemantic.apply {
             tvRowTitle.text = getString(R.string.settings_semantic)
             tvRowSub.text = getString(R.string.settings_semantic_sub)
-            ivRowIcon.setImageResource(R.drawable.ic_search)
+            ivRowIcon.setImageResource(R.drawable.ic_sparkle)
             switchRow.visibility = View.VISIBLE
             ivChevron.visibility = View.GONE
             switchRow.isChecked = prefs.getBoolean(PREF_SEMANTIC_RERANK, true)
@@ -610,14 +667,10 @@ class MainActivity : AppCompatActivity() {
             ivRowIcon.setImageResource(R.drawable.ic_file)
             switchRow.visibility = View.VISIBLE
             ivChevron.visibility = View.GONE
-            switchRow.isChecked = true
-        }
-        settingsBinding.rowMaxFiles.apply {
-            tvRowSub.text = getString(R.string.settings_max_files_sub)
-            ivRowIcon.setImageResource(R.drawable.ic_shield)
-            switchRow.visibility = View.GONE
-            ivChevron.visibility = View.VISIBLE
-            root.setOnClickListener { cycleMaxFiles() }
+            switchRow.isChecked = prefs.getBoolean(PREF_SCAN_DOCUMENT_TEXT, true)
+            switchRow.setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean(PREF_SCAN_DOCUMENT_TEXT, isChecked).apply()
+            }
         }
         settingsBinding.rowAutoReindex.apply {
             tvRowTitle.text = getString(R.string.settings_auto_reindex)
@@ -662,29 +715,6 @@ class MainActivity : AppCompatActivity() {
             ivChevron.visibility = View.VISIBLE
             root.setOnClickListener { clearIndex() }
         }
-    }
-
-    private fun cycleMaxFiles() {
-        val current = prefs.getInt(PREF_MAX_FILES, 5_000)
-        val idx = maxFilesOptions.indexOf(current).let { if (it < 0) 2 else it }
-        val next = maxFilesOptions[(idx + 1) % maxFilesOptions.size]
-        prefs.edit().putInt(PREF_MAX_FILES, next).apply()
-        refreshMaxFilesRow()
-        showToast(getString(R.string.toast_max_files, formatMaxFiles(next)))
-    }
-
-    private fun refreshMaxFilesRow() {
-        val value = prefs.getInt(PREF_MAX_FILES, 5_000)
-        settingsBinding.rowMaxFiles.tvRowTitle.text =
-            getString(R.string.settings_max_files_fmt, formatMaxFiles(value))
-    }
-
-    private fun formatMaxFiles(value: Int): String = when (value) {
-        1_000 -> "1,000"
-        2_000 -> "2,000"
-        5_000 -> "5,000"
-        10_000 -> "10,000"
-        else -> "%,d".format(value)
     }
 
     // ─────────────────────────────────────────────
@@ -924,7 +954,6 @@ class MainActivity : AppCompatActivity() {
                 indexBinding.progressScanBar.visibility = View.GONE
                 indexBinding.tvCurrentFile.visibility = View.GONE
                 if (isEngineReady) {
-                    indexer.loadFromDatabase()
                     val size = indexer.size
                     updateIndexDialCount(size)
                     indexBinding.indexDial.setProgress(1f)
@@ -1772,8 +1801,8 @@ class MainActivity : AppCompatActivity() {
         private const val PREF_VOICE_SEARCH_ENABLED = "voice_search_enabled"
         private const val PREF_SEMANTIC_RERANK = "semantic_rerank_enabled"
         private const val PREF_AUTO_REINDEX = "auto_reindex_enabled"
+        private const val PREF_SCAN_DOCUMENT_TEXT = "scan_document_text_enabled"
         private const val PREF_LAST_TAB = "last_tab"
-        private const val PREF_MAX_FILES = "max_files_index"
         private const val REQUEST_READ_STORAGE   = 100
         private const val REQUEST_MANAGE_STORAGE = 101
         private const val REQUEST_RECORD_AUDIO   = 102

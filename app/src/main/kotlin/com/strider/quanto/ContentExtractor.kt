@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
+import org.jaudiotagger.audio.AudioFile
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
 import java.io.File
@@ -132,57 +133,88 @@ data class PdfExtract(
     val metadata: Map<String, String>,
     val rawText: String?,
     /** Longer text window for party/entity extraction (separate from embed snippet). */
-    val entityRawText: String? = null
+    val entityRawText: String? = null,
+    /** True when stripper found little text and deferred OCR should run. */
+    val needsOcr: Boolean = false
 )
 
 /** Single PDDocument load — content, metadata, and owner-name text together. */
-fun extractPdfBundle(file: File): PdfExtract {
+fun extractPdfBundle(file: File, ocrText: String? = null): PdfExtract {
     if (file.length() == 0L) return PdfExtract(null, emptyMap(), null)
     return try {
         PDDocument.load(file).use { doc ->
-            if (doc.isEncrypted) return PdfExtract(null, emptyMap(), null)
-
-            val info = doc.documentInformation
-            val metadata = mapOf(
-                "title"    to (info.title    ?: ""),
-                "author"   to (info.author   ?: ""),
-                "subject"  to (info.subject  ?: ""),
-                "keywords" to (info.keywords ?: ""),
-                "creator"  to (info.creator  ?: ""),
-                "pages"    to doc.numberOfPages.toString()
-            ).filter { it.value.isNotBlank() }
-
-            val stripper = PDFTextStripper().apply {
-                startPage = 1
-                endPage   = minOf(3, doc.numberOfPages)
-            }
-            val rawText = stripper.getText(doc).take(MAX_CHARS)
-
-            val entityStripper = PDFTextStripper().apply {
-                startPage = 1
-                endPage   = minOf(5, doc.numberOfPages)
-            }
-            val entityRawText = entityStripper.getText(doc).take(4_000)
-
-            val metaParts = listOfNotNull(
-                metadata["title"]?.let { "title $it" },
-                metadata["author"]?.let { "author $it" },
-                metadata["keywords"]
-            )
-            val contentSnippet = (cleanToKeywords(rawText) + " " + metaParts.joinToString(" "))
-                .trim()
-                .ifBlank { null }
-
-            PdfExtract(
-                contentSnippet = contentSnippet,
-                metadata = metadata,
-                rawText = rawText.ifBlank { null },
-                entityRawText = entityRawText.ifBlank { null }
-            )
+            extractPdfBundleFromDocument(file, doc, ocrText)
         }
     } catch (e: Exception) {
         Log.w(TAG, "PDF extract failed ${file.name}: ${e.message}")
         PdfExtract(null, emptyMap(), null)
+    }
+}
+
+internal fun extractPdfBundleFromDocument(
+    file: File,
+    doc: PDDocument,
+    ocrText: String? = null
+): PdfExtract {
+    if (doc.isEncrypted) return PdfExtract(null, emptyMap(), null)
+
+    val info = doc.documentInformation
+    val metadata = mapOf(
+        "title"    to (info.title    ?: ""),
+        "author"   to (info.author   ?: ""),
+        "subject"  to (info.subject  ?: ""),
+        "keywords" to (info.keywords ?: ""),
+        "creator"  to (info.creator  ?: ""),
+        "pages"    to doc.numberOfPages.toString()
+    ).filter { it.value.isNotBlank() }
+
+    val strippedRaw: String
+    val strippedEntity: String
+    if (ocrText != null) {
+        // OCR path — skip stripper (scanned PDFs have no text layer; saves CPU/heat).
+        strippedRaw = ""
+        strippedEntity = ""
+    } else {
+        val stripper = PDFTextStripper().apply {
+            startPage = 1
+            endPage   = minOf(5, doc.numberOfPages)
+        }
+        val fullText = stripper.getText(doc)
+        strippedRaw = fullText
+        strippedEntity = fullText
+    }
+
+    val rawText = mergePdfText(strippedRaw, ocrText).take(MAX_CHARS)
+    val entityRawText = mergePdfText(strippedEntity, ocrText).take(4_000)
+
+    val metaParts = listOfNotNull(
+        metadata["title"]?.let { "title $it" },
+        metadata["author"]?.let { "author $it" },
+        metadata["keywords"]
+    )
+    val contentSnippet = (cleanToKeywords(rawText) + " " + metaParts.joinToString(" "))
+        .trim()
+        .ifBlank { null }
+
+    val needsOcr = ocrText == null &&
+        PdfTextQuality.needsOcr(file, strippedRaw, doc.numberOfPages, doc.isEncrypted)
+
+    return PdfExtract(
+        contentSnippet = contentSnippet,
+        metadata = metadata,
+        rawText = rawText.ifBlank { null },
+        entityRawText = entityRawText.ifBlank { null },
+        needsOcr = needsOcr
+    )
+}
+
+private fun mergePdfText(stripped: String, ocrText: String?): String {
+    val strip = stripped.trim()
+    val ocr = ocrText?.trim().orEmpty()
+    return when {
+        ocr.isBlank() -> strip
+        strip.isBlank() -> ocr
+        else -> "$strip $ocr"
     }
 }
 
@@ -236,25 +268,31 @@ fun extractXlsxContent(file: File): String? {
 // PPTX extractor + slide titles (5E)
 // ─────────────────────────────────────────────
 
-fun extractPptxTitles(file: File): List<String> {
+fun extractPptxTitles(file: File): List<String> =
+    try {
+        ZipFile(file).use { extractPptxTitlesFromZip(it) }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+private fun extractPptxTitlesFromZip(zip: ZipFile): List<String> {
     return try {
-        ZipFile(file).use { zip ->
-            zip.entries().toList()
-                .filter { it.name.startsWith("ppt/slides/slide") && it.name.endsWith(".xml") }
-                .take(10)
-                .mapNotNull { entry ->
-                    val xml = zip.getInputStream(entry).bufferedReader().readText()
-                    val titleMatch = Regex(
-                        "<p:sp>.*?<p:ph type=\"title\".*?</p:sp>",
-                        RegexOption.DOT_MATCHES_ALL
-                    ).find(xml)
-                    titleMatch?.value
-                        ?.replace(Regex("<[^>]+>"), " ")
-                        ?.replace(Regex("\\s+"), " ")
-                        ?.trim()
-                        ?.takeIf { it.isNotBlank() }
-                }
-        }
+        zip.entries().asSequence()
+            .filter { it.name.startsWith("ppt/slides/slide") && it.name.endsWith(".xml") }
+            .take(10)
+            .mapNotNull { entry ->
+                val xml = zip.getInputStream(entry).bufferedReader().readText()
+                val titleMatch = Regex(
+                    "<p:sp>.*?<p:ph type=\"title\".*?</p:sp>",
+                    RegexOption.DOT_MATCHES_ALL
+                ).find(xml)
+                titleMatch?.value
+                    ?.replace(Regex("<[^>]+>"), " ")
+                    ?.replace(Regex("\\s+"), " ")
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+            }
+            .toList()
     } catch (e: Exception) {
         emptyList()
     }
@@ -265,18 +303,16 @@ fun extractPptxContent(file: File): String? {
     return try {
         ZipFile(file).use { zip ->
             val sb = StringBuilder()
-            val titles = extractPptxTitles(file)
+            val titles = extractPptxTitlesFromZip(zip)
             sb.append(titles.joinToString(" ")).append(" ")
 
-            val entries = zip.entries().toList()
+            for (entry in zip.entries().asSequence()
                 .filter { it.name.startsWith("ppt/slides/slide") && it.name.endsWith(".xml") }
-                .take(5)
-
-            for (entry in entries) {
+                .take(5)) {
+                if (sb.length > MAX_CHARS) break
                 val xml = zip.getInputStream(entry).bufferedReader().readText()
                 val text = xml.replace(Regex("<[^>]+>"), " ")
                 sb.append(text).append(" ")
-                if (sb.length > MAX_CHARS) break
             }
             cleanToKeywords(sb.toString().take(MAX_CHARS))
         }
@@ -358,9 +394,19 @@ data class AudioTagData(
     val year: String?
 )
 
-fun extractAudioHeader(file: File): Map<String, String> {
+fun extractAudioHeader(file: File): Map<String, String> =
+    extractAudioHeaderFromFile(readAudioFileOrNull(file))
+
+private fun readAudioFileOrNull(file: File): AudioFile? =
+    try {
+        AudioFileIO.read(file)
+    } catch (e: Exception) {
+        null
+    }
+
+private fun extractAudioHeaderFromFile(audioFile: AudioFile?): Map<String, String> {
+    if (audioFile == null) return emptyMap()
     return try {
-        val audioFile = AudioFileIO.read(file)
         val header = audioFile.audioHeader
         mapOf(
             "duration" to when {
@@ -376,9 +422,12 @@ fun extractAudioHeader(file: File): Map<String, String> {
     }
 }
 
-fun extractAudioTags(file: File): AudioTagData? {
+fun extractAudioTags(file: File): AudioTagData? =
+    extractAudioTagsFromFile(readAudioFileOrNull(file))
+
+private fun extractAudioTagsFromFile(audioFile: AudioFile?): AudioTagData? {
+    if (audioFile == null) return null
     return try {
-        val audioFile = AudioFileIO.read(file)
         val tag = audioFile.tag ?: return null
         AudioTagData(
             title  = tag.getFirst(FieldKey.TITLE).takeIf { it.isNotBlank() },
@@ -388,9 +437,14 @@ fun extractAudioTags(file: File): AudioTagData? {
             year   = tag.getFirst(FieldKey.YEAR).takeIf { it.isNotBlank() }
         )
     } catch (e: Exception) {
-        Log.w(TAG, "Audio tags failed ${file.name}: ${e.message}")
+        Log.w(TAG, "Audio tags failed: ${e.message}")
         null
     }
+}
+
+private fun extractAudioMetadata(file: File): Pair<AudioTagData?, Map<String, String>> {
+    val audioFile = readAudioFileOrNull(file)
+    return extractAudioTagsFromFile(audioFile) to extractAudioHeaderFromFile(audioFile)
 }
 
 fun audioTagsToString(tags: AudioTagData, header: Map<String, String> = emptyMap()): String {
@@ -432,8 +486,7 @@ fun extractContent(file: File): String? {
         "mp3", "aac",
         "flac", "m4a",
         "wav"             -> {
-            val tags   = extractAudioTags(file)
-            val header = extractAudioHeader(file)
+            val (tags, header) = extractAudioMetadata(file)
             if (tags != null) audioTagsToString(tags, header) else null
         }
         else              -> null

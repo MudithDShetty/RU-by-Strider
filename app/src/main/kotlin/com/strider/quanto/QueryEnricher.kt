@@ -218,8 +218,8 @@ private val FILLER_WORDS = setOf(
     // English request verbs
     "find", "show", "get", "search", "look", "fetch", "give", "bring",
     "tell", "open", "load", "pull", "grab", "list",
-    // Pronouns / determiners
-    "me", "my", "the", "a", "an", "some", "any", "all", "this", "that",
+    // Pronouns / determiners (possessives like "my"/"mera" are kept — see POSSESSIVE_KEEP_WORDS)
+    "me", "the", "a", "an", "some", "any", "all", "this", "that",
     "these", "those", "it", "its", "your", "our", "you", "i", "we",
     // Politeness / modals
     "please", "can", "could", "would", "should", "will", "want", "need",
@@ -230,8 +230,8 @@ private val FILLER_WORDS = setOf(
     // Generic nouns that appear in natural speech but aren't file signals
     "info", "information", "details", "detail", "stuff", "thing", "things",
     "file", "files", "document", "documents", "doc", "data", "record",
-    // Hindi / Hinglish
-    "mera", "meri", "mere", "mujhe", "dhundo", "dikhao", "dedo",
+    // Hindi / Hinglish (mera/meri/mere kept for owner intent)
+    "mujhe", "dhundo", "dikhao", "dedo",
     "chahiye", "karo", "wala", "wali", "hai", "hain", "tha", "thi",
     "jaldi", "abhi", "yahan", "wahan", "kya", "konsa", "batao", "bata"
 )
@@ -354,9 +354,7 @@ data class EnrichedQuery(
 // Owner intent (my / named third-party)
 // ─────────────────────────────────────────────
 
-private val POSSESSIVE_MARKERS = setOf(
-    "my", "mine", "me", "mera", "meri", "mere", "mujhe", "apna", "apni", "apne"
-)
+private val POSSESSIVE_MARKERS = POSSESSIVE_KEEP_WORDS
 
 private val NAME_QUERY_BLOCKLIST = buildSet {
     addAll(FILLER_WORDS)
@@ -456,22 +454,26 @@ fun enrichQuery(rawQuery: String, userNameTokens: List<String> = emptyList()): E
         .filter { it.isNotBlank() }
         .joinToString(" ")
 
-    Log.d(TAG, "Raw query    : $rawQuery")
-    Log.d(TAG, "Clean embed  : $embedQuery")
-    Log.d(TAG, "BM25 keywords: $bm25WithOwner")
-    Log.d(TAG, "Language hint: ${mlForms.languageHint}")
-    Log.d(TAG, "Lexical tok  : ${lexicalWithOwner.take(8)}")
-    Log.d(TAG, "Categories   : $categoryHints")
-    Log.d(TAG, "Time hint    : $timeHint")
-    Log.d(TAG, "Action intent: $actionIntent")
-    Log.d(TAG, "Share target : $shareTarget")
-    Log.d(TAG, "Period hints : $periodHints")
-    Log.d(TAG, "Owner intent : $ownerIntent target=$ownerTargetTokens")
+    if (BuildConfig.DEBUG) {
+        Log.d(TAG, "Raw query    : $rawQuery")
+        Log.d(TAG, "Clean embed  : $embedQuery")
+        Log.d(TAG, "BM25 keywords: $bm25WithOwner")
+        Log.d(TAG, "Language hint: ${mlForms.languageHint}")
+        Log.d(TAG, "Lexical tok  : ${lexicalWithOwner.take(8)}")
+        Log.d(TAG, "Categories   : $categoryHints")
+        Log.d(TAG, "Time hint    : $timeHint")
+        Log.d(TAG, "Action intent: $actionIntent")
+        Log.d(TAG, "Share target : $shareTarget")
+        Log.d(TAG, "Period hints : $periodHints")
+        Log.d(TAG, "Owner intent : $ownerIntent target=$ownerTargetTokens")
+    }
 
     val queryType = resolveQueryType(rawQuery, mlForms.coreTokens.ifEmpty {
         MultilingualBridge.coreTokens(cleanQuery)
     })
-    Log.d(TAG, "Query type    : $queryType")
+    if (BuildConfig.DEBUG) {
+        Log.d(TAG, "Query type    : $queryType")
+    }
 
     return EnrichedQuery(
         rawQuery               = rawQuery,

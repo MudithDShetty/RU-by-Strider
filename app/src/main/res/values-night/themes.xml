@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.StriderQuanto" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/ru_crimson</item>
+        <item name="colorPrimaryVariant">@color/ru_dark</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSurface">@color/surface_solid</item>
+        <item name="android:windowBackground">@color/ru_bg</item>
+        <item name="android:statusBarColor">@color/ru_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/ru_bg</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:fontFamily">@font/hanken_grotesk</item>
+        <item name="switchStyle">@style/RuSwitch</item>
+    </style>
+</resources>

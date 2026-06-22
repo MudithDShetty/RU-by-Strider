@@ -2,6 +2,7 @@ package com.strider.quanto
 
 import android.util.Log
 import com.strider.quanto.eval.EvalLogger
+import com.tom_roush.pdfbox.pdmodel.PDDocument
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -53,6 +54,13 @@ data class IndexedFile(
     }
 }
 
+data class IndexDirectoryResult(
+    val indexedCount: Int,
+    val skippedCount: Int,
+    val deletedCount: Int,
+    val ocrPendingCount: Int
+)
+
 class FileIndexer(
     private val engine: EmbeddingEngine,
     private val db: DatabaseHelper
@@ -90,6 +98,10 @@ class FileIndexer(
 
         /** Brief pause between batches to reduce sustained CPU heat. */
         private const val BATCH_COOLDOWN_MS = 40L
+
+        private const val OCR_SESSION_CAP = 200
+        private const val OCR_COOLDOWN_MS = 400L
+        private const val OCR_EMBED_COOLDOWN_MS = 120L
     }
 
     private val searchLock = Any()
@@ -167,15 +179,16 @@ class FileIndexer(
     suspend fun indexDirectory(
         rootPath: String,
         source: String = "manual",
+        scanDocumentText: Boolean = true,
         onProgress: suspend (String) -> Unit,
         onFileIndexed: suspend (Int, Int, Int) -> Unit
-    ) = withContext(Dispatchers.IO) {
+    ): IndexDirectoryResult = withContext(Dispatchers.IO) {
         val indexStartMs = System.currentTimeMillis()
 
         val root = File(rootPath)
         if (!root.exists() || !root.canRead()) {
             onProgress("Cannot read $rootPath — check permissions")
-            return@withContext
+            return@withContext IndexDirectoryResult(0, 0, 0, 0)
         }
 
         val storedMeta = db.getStoredFileMeta()
@@ -204,7 +217,7 @@ class FileIndexer(
             )
         )
 
-        Log.d(TAG, "Files on disk: ${diskFiles.size} (no cap — all will be indexed)")
+        Log.d(TAG, "Files on disk: ${diskFiles.size} — indexing all supported files")
 
         val diskPaths = diskFiles.map { it.absolutePath }.toSet()
         val deletedPaths = storedMeta.keys.filter { it !in diskPaths }
@@ -255,7 +268,8 @@ class FileIndexer(
                         metadata     = metadata
                     )
 
-                    db.upsertFile(indexed)
+                    val ocrPending = scanDocumentText && metadata.pdfNeedsOcr
+                    db.upsertFile(indexed, ocrPending)
                     val keywords = buildKeywordString(
                         file, metadata.contentSnippet, metadata, metadata.pdfMetadata
                     )
@@ -286,7 +300,8 @@ class FileIndexer(
                             metadata     = metadata
                         )
 
-                        db.upsertFile(indexed)
+                        val ocrPending = scanDocumentText && metadata.pdfNeedsOcr
+                        db.upsertFile(indexed, ocrPending)
                         val keywords = buildKeywordString(
                             file, metadata.contentSnippet, metadata, metadata.pdfMetadata
                         )
@@ -300,9 +315,11 @@ class FileIndexer(
             }
         }
 
-        loadFromDatabase()
+        // FTS keywords are written per file during indexing — no full-library backfill here.
+        Log.d(TAG, "Index ready — ${db.getTotalCount()} files (disk-backed search)")
         db.warmEmbeddingCache()
-        Log.d(TAG, "Done — indexed:$indexedCount skipped:$skippedCount deleted:${deletedPaths.size} total:$size")
+        val ocrPendingCount = if (scanDocumentText) db.getOcrPendingCount() else 0
+        Log.d(TAG, "Done — indexed:$indexedCount skipped:$skippedCount deleted:${deletedPaths.size} total:$size ocrPending:$ocrPendingCount")
         if (EvalLogger.enabled) {
             EvalLogger.logIndexCompleted(
                 source = source,
@@ -314,6 +331,81 @@ class FileIndexer(
                 categoryCounts = getBucketSizes()
             )
         }
+        IndexDirectoryResult(
+            indexedCount = indexedCount,
+            skippedCount = skippedCount,
+            deletedCount = deletedPaths.size,
+            ocrPendingCount = ocrPendingCount
+        )
+    }
+
+    /** Re-index a single PDF after OCR — same embed/FTS path as main indexer. */
+    suspend fun applyOcrAndReindex(file: File, ocrText: String, pdfBundle: PdfExtract? = null) =
+        withContext(Dispatchers.IO) {
+        val metadata = buildFileMetadata(file, ocrText, pdfBundle)
+        if (metadata.metadataString.isBlank()) {
+            db.clearOcrPending(file.absolutePath)
+            return@withContext
+        }
+        val embedding = engine.embed(metadata.metadataString)
+        if (OCR_EMBED_COOLDOWN_MS > 0) delay(OCR_EMBED_COOLDOWN_MS)
+        val indexed = IndexedFile(
+            path         = file.absolutePath,
+            name         = file.name,
+            extension    = file.extension.lowercase(),
+            sizeBytes    = file.length(),
+            lastModified = file.lastModified(),
+            embedding    = embedding,
+            categories   = metadata.categories,
+            metadata     = metadata
+        )
+        db.upsertFile(indexed, ocrPending = false)
+        val keywords = buildKeywordString(
+            file, metadata.contentSnippet, metadata, metadata.pdfMetadata
+        )
+        db.ftsInsert(file.absolutePath, keywords)
+        Log.d(TAG, "OCR re-indexed ${file.name}")
+    }
+
+    suspend fun processOcrPending(
+        onProgress: suspend (String) -> Unit,
+        maxFiles: Int = OCR_SESSION_CAP
+    ): Int = withContext(Dispatchers.IO) {
+        val paths = db.getOcrPendingPaths(maxFiles)
+            .sortedBy { pathPriority(File(it)) }
+        if (paths.isEmpty()) return@withContext 0
+
+        var processed = 0
+        paths.forEachIndexed { index, path ->
+            val file = File(path)
+            if (!file.exists()) {
+                db.clearOcrPending(path)
+                return@forEachIndexed
+            }
+            if (!PdfTextQuality.isOcrEligiblePath(file)) {
+                db.clearOcrPending(path)
+                return@forEachIndexed
+            }
+            val remaining = paths.size - index
+            onProgress("Reading scanned documents… ($remaining remaining)")
+            try {
+                PDDocument.load(file).use { doc ->
+                    val ocrText = DocumentOcr.ocrFromDocument(file, doc)
+                    if (ocrText != null) {
+                        val bundle = extractPdfBundleFromDocument(file, doc, ocrText)
+                        applyOcrAndReindex(file, ocrText, bundle)
+                    } else {
+                        db.clearOcrPending(path)
+                    }
+                }
+                processed++
+            } catch (e: Exception) {
+                Log.e(TAG, "OCR worker failed for ${file.name}: ${e.message}", e)
+                db.clearOcrPending(path)
+            }
+            if (OCR_COOLDOWN_MS > 0) delay(OCR_COOLDOWN_MS)
+        }
+        processed
     }
 
     /** Populate FTS keywords in batches — paths only, no full stub load into memory. */
@@ -373,6 +465,8 @@ class FileIndexer(
         }
         return PRIORITY_DIRS.size
     }
+
+    private fun pathPriority(file: File): Int = filePriority(file)
 }
 
 data class SearchResult(

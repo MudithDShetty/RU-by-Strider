@@ -67,13 +67,38 @@ enum class ScriptRange(val displayName: String, val ranges: List<IntRange>) {
 }
 
 /**
- * Conversational stop words across major languages.
- * Stops "Gib mir meine X" / "Montrez-moi mes X" from polluting scoring.
+ * Possessive / owner markers — never stripped from voice text or search tokens.
+ * "find my aadhaar info" → "my aadhaar", not bare "aadhaar".
+ */
+val POSSESSIVE_KEEP_WORDS: Set<String> = setOf(
+    // English
+    "my", "mine", "me",
+    // Hindi / Hinglish
+    "mera", "meri", "mere", "mujhe", "apna", "apni", "apne",
+    // German
+    "mein", "meine", "meiner", "meinem", "meinen",
+    // French
+    "mon", "ma", "mes",
+    // Spanish
+    "mi", "mis", "mio", "mia",
+    // Italian
+    "miei", "mie",
+    // Portuguese
+    "meu", "minha", "meus", "minhas",
+    // Dutch
+    "mijn",
+    // Russian (romanized)
+    "мой", "моя", "мои"
+)
+
+/**
+ * Conversational filler stripped before embedding & from voice display.
+ * Excludes [POSSESSIVE_KEEP_WORDS] — those carry owner intent ("my Aadhaar", "mera PAN").
  */
 val MULTILINGUAL_STOP_WORDS: Set<String> = setOf(
     // English
     "find", "show", "get", "search", "look", "fetch", "give", "bring", "tell", "open",
-    "load", "pull", "grab", "list", "me", "my", "the", "a", "an", "some", "any", "all",
+    "load", "pull", "grab", "list", "the", "a", "an", "some", "any", "all",
     "this", "that", "these", "those", "it", "its", "your", "our", "you", "i", "we",
     "please", "can", "could", "would", "should", "will", "want", "need", "help",
     "also", "just", "really", "actually", "maybe", "for", "about", "of", "on", "in",
@@ -81,12 +106,12 @@ val MULTILINGUAL_STOP_WORDS: Set<String> = setOf(
     "if", "when", "where", "info", "information", "details", "detail", "stuff",
     "thing", "things", "file", "files", "document", "documents", "doc", "data", "record",
     // Hindi / Hinglish
-    "mera", "meri", "mere", "mujhe", "mujhko", "dhundo", "dikhao", "dedo", "chahiye",
+    "mujhko", "dhundo", "dikhao", "dedo", "chahiye",
     "karo", "wala", "wali", "wale", "hai", "hain", "tha", "thi", "jaldi", "abhi",
     "yahan", "wahan", "kya", "konsa", "konsi", "batao", "bata", "ko", "ka", "ki", "ke",
-    "se", "mein", "me", "par", "pe",
+    "se", "mein", "par", "pe",
     // German
-    "gib", "gibt", "mir", "mich", "meine", "mein", "meiner", "meinem", "meinen",
+    "gib", "gibt", "mir", "mich",
     "zeig", "zeige", "finde", "finden", "suche", "such", "hol", "hole", "bitte",
     "alle", "alles", "der", "die", "das", "den", "dem", "des", "ein", "eine", "einer",
     "einem", "einen", "und", "oder", "aber", "fuer", "fur", "von", "zu", "zum", "zur",
@@ -94,27 +119,27 @@ val MULTILINGUAL_STOP_WORDS: Set<String> = setOf(
     "ich", "du", "er", "sie", "es", "wir", "ihr", "mal", "doch", "noch", "schon",
     // French
     "montre", "montrez", "trouve", "trouvez", "cherche", "chercher", "donne", "donnez",
-    "moi", "mes", "mon", "ma", "le", "la", "les", "un", "une", "des", "du", "de",
+    "moi", "le", "la", "les", "un", "une", "des", "du", "de",
     "dans", "sur", "avec", "pour", "par", "est", "sont", "et", "ou", "je", "tu",
     "il", "elle", "nous", "vous", "ils", "elles", "ce", "cette", "ces", "svp",
     // Spanish
-    "busca", "buscar", "encuentra", "muestra", "mostrar", "dame", "dame", "mis",
-    "mi", "tu", "su", "los", "las", "el", "la", "un", "una", "unos", "unas",
+    "busca", "buscar", "encuentra", "muestra", "mostrar", "dame",
+    "tu", "su", "los", "las", "el", "la", "un", "una", "unos", "unas",
     "de", "del", "en", "con", "por", "para", "que", "como", "yo", "tu", "el",
     "ella", "nosotros", "ellos", "ellas", "porfavor",
     // Italian
-    "trova", "cerca", "mostra", "dammi", "mio", "mia", "miei", "mie", "il", "lo",
+    "trova", "cerca", "mostra", "dammi", "il", "lo",
     "la", "i", "gli", "le", "un", "uno", "una", "di", "del", "della", "dei",
     "che", "con", "per", "non", "sono", "io", "tu", "lui", "lei", "noi", "voi",
     // Portuguese
-    "achar", "ache", "mostre", "meu", "minha", "meus", "minhas", "o", "a", "os",
+    "achar", "ache", "mostre", "o", "a", "os",
     "as", "um", "uma", "de", "do", "da", "dos", "das", "em", "com", "por", "para",
     "eu", "voce", "ele", "ela", "nos", "eles", "elas",
     // Dutch
-    "zoek", "vind", "toon", "laat", "mijn", "de", "het", "een", "van", "in", "op",
+    "zoek", "vind", "toon", "laat", "de", "het", "een", "van", "in", "op",
     "met", "voor", "door", "ik", "jij", "hij", "zij", "wij", "jullie",
     // Russian (romanized common)
-    "найди", "покажи", "мой", "моя", "мои", "мне", "дай", "и", "в", "на", "с", "по"
+    "найди", "покажи", "мне", "дай", "и", "в", "на", "с", "по"
 )
 
 private val LANGUAGE_HINT_PATTERNS = listOf(
@@ -140,6 +165,23 @@ private val LANGUAGE_HINT_PATTERNS = listOf(
     LanguageHint.MARATHI to listOf("in marathi", "marathi mein"),
     LanguageHint.URDU to listOf("in urdu", "urdu mein"),
     LanguageHint.ARABIC to listOf("in arabic", "arabic mein", "in arabic")
+)
+
+/** Shown in the search field after voice cleanup so [extractLanguageHint] still runs at search time. */
+private val CANONICAL_LANGUAGE_HINT_PHRASE = mapOf(
+    LanguageHint.HINDI to "in hindi",
+    LanguageHint.ENGLISH to "in english",
+    LanguageHint.GERMAN to "in german",
+    LanguageHint.FRENCH to "in french",
+    LanguageHint.SPANISH to "in spanish",
+    LanguageHint.ITALIAN to "in italian",
+    LanguageHint.PORTUGUESE to "in portuguese",
+    LanguageHint.TAMIL to "in tamil",
+    LanguageHint.TELUGU to "in telugu",
+    LanguageHint.BENGALI to "in bengali",
+    LanguageHint.MARATHI to "in marathi",
+    LanguageHint.URDU to "in urdu",
+    LanguageHint.ARABIC to "in arabic"
 )
 
 /** Colloquial command words mapped to English (voice + typed, many languages). */
@@ -252,9 +294,24 @@ object MultilingualBridge {
         )
     }
 
+    /**
+     * Refine a spoken query for the search field: drop command/filler words ("find", "info")
+     * but keep possessives ("my", "mera") and language hints ("in hindi") for ranking.
+     * Hints are re-appended in canonical form so [enrichQuery] can boost matching script.
+     */
     fun normalizeVoiceTranscript(transcript: String): String {
-        val forms = buildForms(transcript)
-        return forms.embedQuery.ifBlank { transcript.trim() }
+        val trimmed = transcript.trim().replace(Regex("\\s+"), " ")
+        if (trimmed.isBlank()) return trimmed
+        val (hint, stripped) = extractLanguageHint(trimmed)
+        val colloquial = normalizeColloquial(stripped)
+        val refined = stripStopWords(colloquial).ifBlank { stripped.ifBlank { trimmed } }
+        return if (hint != null) appendCanonicalLanguageHint(refined, hint) else refined
+    }
+
+    private fun appendCanonicalLanguageHint(refined: String, hint: LanguageHint): String {
+        val phrase = CANONICAL_LANGUAGE_HINT_PHRASE[hint] ?: return refined
+        if (refined.isBlank()) return phrase
+        return "$refined $phrase"
     }
 
     fun normalizeColloquial(text: String): String =

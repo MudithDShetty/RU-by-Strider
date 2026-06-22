@@ -9,7 +9,7 @@ import java.nio.ByteBuffer
 
 private const val TAG = "DatabaseHelper"
 private const val DB_NAME = "ru_index.db"
-private const val DB_VERSION = 4
+private const val DB_VERSION = 6
 private const val FTS_TABLE = "fts_index"
 
 private enum class FtsMode { FTS5, FTS4, NONE }
@@ -38,6 +38,9 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         const val COL_OWNER_NAMES   = "owner_names"
         const val COL_OWNER_CONF    = "owner_confidence"
         const val COL_ENTITIES      = "entities"
+        const val COL_OCR_PENDING   = "ocr_pending"
+        /** Reserved for future hierarchy embeddings; unused in app — keeps DB v6 compatible. */
+        const val COL_HYP_EMBEDDING = "hyp_embedding"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -59,7 +62,9 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             "$COL_INDEXED_AT INTEGER NOT NULL, " +
             "$COL_OWNER_NAMES TEXT, " +
             "$COL_OWNER_CONF REAL NOT NULL DEFAULT 0, " +
-            "$COL_ENTITIES TEXT)"
+            "$COL_ENTITIES TEXT, " +
+            "$COL_OCR_PENDING INTEGER NOT NULL DEFAULT 0, " +
+            "$COL_HYP_EMBEDDING BLOB)"
         )
 
         db.execSQL("CREATE INDEX idx_path ON $TABLE ($COL_PATH)")
@@ -86,6 +91,30 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_ENTITIES TEXT")
             db.execSQL("UPDATE $TABLE SET $COL_LAST_MODIFIED = 0")
             Log.d(TAG, "DB upgraded to v4: entities column added, all files queued for re-index")
+        }
+        if (oldVersion < 5) {
+            db.execSQL(
+                "ALTER TABLE $TABLE ADD COLUMN $COL_OCR_PENDING INTEGER NOT NULL DEFAULT 0"
+            )
+            db.execSQL(
+                "UPDATE $TABLE SET $COL_OCR_PENDING = 1 " +
+                    "WHERE $COL_EXT = 'pdf' AND (" +
+                    "$COL_CONTENT_SNIP IS NULL OR LENGTH($COL_CONTENT_SNIP) < 30)"
+            )
+            Log.d(TAG, "DB upgraded to v5: ocr_pending added, weak PDFs queued for OCR")
+        }
+        if (oldVersion < 6) {
+            addHypEmbeddingColumnIfMissing(db)
+            Log.d(TAG, "DB upgraded to v6: hyp_embedding column (reserved, unused)")
+        }
+    }
+
+    private fun addHypEmbeddingColumnIfMissing(db: SQLiteDatabase) {
+        try {
+            db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_HYP_EMBEDDING BLOB")
+        } catch (e: Exception) {
+            // Column may already exist from experimental build — safe to ignore.
+            Log.w(TAG, "hyp_embedding column add skipped: ${e.message}")
         }
     }
 
@@ -125,8 +154,10 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         return FloatArray(blob.size / 4) { buf.getFloat() }
     }
 
-    fun upsertFile(file: IndexedFile) {
-        Log.d(TAG, "Upserting: ${file.path} | Metadata: ${file.metadata.metadataString}")
+    fun upsertFile(file: IndexedFile, ocrPending: Boolean = false) {
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "Upserting: ${file.path} | Metadata: ${file.metadata.metadataString}")
+        }
         val db = writableDatabase
         val cv = ContentValues().apply {
             put(COL_PATH,          file.path)
@@ -145,13 +176,54 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             put(COL_OWNER_NAMES,   OwnerMatcher.serializeEntities(file.metadata.ownerEntities))
             put(COL_OWNER_CONF,    file.metadata.ownerConfidence)
             put(COL_ENTITIES,      serializeEntities(file.metadata.extractedEntities))
+            put(COL_OCR_PENDING,   if (ocrPending) 1 else 0)
         }
         db.insertWithOnConflict(TABLE, null, cv, SQLiteDatabase.CONFLICT_REPLACE)
         embeddingIndex.upsert(file.path, file.embedding)
     }
 
+    fun getOcrPendingCount(): Int {
+        val cursor = readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM $TABLE WHERE $COL_EXT = 'pdf' AND $COL_OCR_PENDING = 1",
+            null
+        )
+        return cursor.use {
+            if (it.moveToFirst()) it.getInt(0) else 0
+        }
+    }
+
+    fun getOcrPendingPaths(limit: Int): List<String> {
+        val cursor = readableDatabase.query(
+            TABLE,
+            arrayOf(COL_PATH),
+            "$COL_EXT = 'pdf' AND $COL_OCR_PENDING = 1",
+            null,
+            null,
+            null,
+            COL_PATH,
+            limit.toString()
+        )
+        val paths = mutableListOf<String>()
+        cursor.use {
+            while (it.moveToNext()) {
+                paths.add(it.getString(0))
+            }
+        }
+        return paths
+    }
+
+    fun clearOcrPending(path: String) {
+        val cv = ContentValues().apply { put(COL_OCR_PENDING, 0) }
+        writableDatabase.update(TABLE, cv, "$COL_PATH = ?", arrayOf(path))
+    }
+
     /** Load all embeddings into RAM for fast dense scan (~1.5 KB per file). */
     fun warmEmbeddingCache() {
+        val dbCount = getTotalCount()
+        if (embeddingIndex.isWarm && embeddingIndex.cachedCount == dbCount) {
+            Log.d(TAG, "Embedding cache already warm ($dbCount vectors)")
+            return
+        }
         embeddingIndex.loadFrom(this)
     }
 

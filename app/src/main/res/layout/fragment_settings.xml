@@ -84,13 +84,6 @@
                 android:layout_height="1dp"
                 android:background="@color/divider"/>
             <include
-                android:id="@+id/rowMaxFiles"
-                layout="@layout/item_settings_row"/>
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/divider"/>
-            <include
                 android:id="@+id/rowAutoReindex"
                 layout="@layout/item_settings_row"/>
         </LinearLayout>

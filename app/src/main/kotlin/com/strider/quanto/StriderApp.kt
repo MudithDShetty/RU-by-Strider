@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.util.Log
-import androidx.appcompat.app.AppCompatDelegate
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -16,6 +15,7 @@ import com.strider.quanto.eval.EvalLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -60,8 +60,8 @@ class StriderApp : Application() {
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
+        RuTheme.applyStored(this)
         super.onCreate()
-        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         instance = this
         EvalLogger.init(this)
         createNotificationChannel()
@@ -155,6 +155,15 @@ class StriderApp : Application() {
                             db.warmEmbeddingCache()
                             Log.i(TAG, "Embedding RAM cache ready: ${db.isEmbeddingCacheWarm()} (${indexer.size} files)")
                         }
+                        val scanDocumentText = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .getBoolean(PREF_SCAN_DOCUMENT_TEXT, true)
+                        if (scanDocumentText && db.getOcrPendingCount() > 0) {
+                            launch {
+                                // Defer OCR so startup (model load + embed warm) finishes first.
+                                delay(OCR_STARTUP_DEFER_MS)
+                                if (db.getOcrPendingCount() > 0) enqueueOcrIndexing()
+                            }
+                        }
                     }
                 }
 
@@ -186,6 +195,7 @@ class StriderApp : Application() {
             } catch (e: Exception) {
                 Log.e(TAG, "Engine init failed", e)
                 initStarted.set(false)
+                synchronized(progressListeners) { progressListeners.clear() }
                 reportProgress(InitPhase.MODEL_LOAD, "Setup failed — restart app", -1)
             }
         }
@@ -204,6 +214,27 @@ class StriderApp : Application() {
         WorkManager.getInstance(this).enqueueUniqueWork(
             IndexingWorker.UNIQUE_WORK_NAME,
             ExistingWorkPolicy.REPLACE,
+            request
+        )
+    }
+
+    fun enqueueOcrIndexing() {
+        if (!isEngineReady) {
+            whenEngineReady { enqueueOcrIndexing() }
+            return
+        }
+        val request = OneTimeWorkRequestBuilder<OcrIndexingWorker>()
+            .addTag(OcrIndexingWorker.WORK_TAG)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiresBatteryNotLow(true)
+                    .build()
+            )
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            OcrIndexingWorker.UNIQUE_WORK_NAME,
+            ExistingWorkPolicy.KEEP,
             request
         )
     }
@@ -248,7 +279,11 @@ class StriderApp : Application() {
         const val PREFS_NAME = "strider_quanto_prefs"
         const val PREF_MODEL_COPIED = "model_copied"
         const val PREF_SETUP_COMPLETE = "setup_complete"
+        const val PREF_SCAN_DOCUMENT_TEXT = "scan_document_text_enabled"
         const val NOTIFICATION_CHANNEL_ID = "indexing_channel"
+
+        /** Wait after cold start before background OCR (reduces heat with model init). */
+        private const val OCR_STARTUP_DEFER_MS = 90_000L
 
         lateinit var instance: StriderApp
             private set

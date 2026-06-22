@@ -155,7 +155,8 @@ object SearchPipeline {
     private data class DenseRetrieveResult(
         val scored: List<Pair<String, Float>>,
         val scan: DenseScanResult,
-        val denseTopK: Int
+        val denseTopK: Int,
+        val queryEmbedding: FloatArray? = null
     )
 
     private fun runSearchPass(
@@ -178,9 +179,13 @@ object SearchPipeline {
         val filenamePaths = FilenameSearch.gatherPaths(db, enrichedQuery)
         val contentPaths = ContentSearch.gatherPaths(db, enrichedQuery)
         val candidatePaths = if (expanded) {
-            DiskSearch.gatherExpandedCandidatePaths(db, enrichedQuery)
+            DiskSearch.gatherExpandedCandidatePaths(
+                db, enrichedQuery, filenamePaths, contentPaths, totalCount
+            )
         } else {
-            DiskSearch.gatherCandidatePaths(db, enrichedQuery)
+            DiskSearch.gatherCandidatePaths(
+                db, enrichedQuery, filenamePaths, contentPaths, totalCount
+            )
         }
         tAfterCandidates = System.nanoTime()
 
@@ -338,7 +343,9 @@ object SearchPipeline {
                 lexicalScores  = lexicalMap,
                 lexicalRankMap = lexicalRankMap,
                 denseRankMap   = denseRankMap,
-                engine         = engine
+                engine         = engine,
+                queryEmbedding = denseResult?.queryEmbedding,
+                denseScores    = denseScored.toMap()
             ),
             query = enrichedQuery,
             topK  = topK
@@ -554,7 +561,7 @@ object SearchPipeline {
             "Granite dense ($totalCount files, top-$denseTopK, cache=${db.isEmbeddingCacheWarm()}): " +
                 "${finalScored.size} hits, top: ${finalScored.firstOrNull()?.first?.substringAfterLast('/')}"
         )
-        return DenseRetrieveResult(finalScored, scan, denseTopK)
+        return DenseRetrieveResult(finalScored, scan, denseTopK, queryEmb)
     }
 
     private fun buildRerankPaths(

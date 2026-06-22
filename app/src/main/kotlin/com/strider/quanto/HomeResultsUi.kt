@@ -132,10 +132,7 @@ class HomeResultsUi(
             }
         } else {
             binding.tvResultsEmpty.visibility = View.GONE
-            binding.tvResultsCount.text =
-                binding.root.context.resources.getQuantityString(
-                    R.plurals.results_files_found, results.size, results.size
-                )
+            binding.tvResultsCount.text = RuUi.formatResultsCountHeader(binding.root.context, results.size)
             resultsAdapter.submitList(results) {
                 binding.rvResults.adapter = resultsAdapter
                 if (!isRefine) {

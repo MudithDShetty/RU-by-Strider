@@ -7,7 +7,10 @@
     android:orientation="horizontal"
     android:background="@drawable/bg_result_row"
     android:layout_marginBottom="10dp"
-    android:padding="13dp"
+    android:paddingStart="13dp"
+    android:paddingEnd="13dp"
+    android:paddingTop="11dp"
+    android:paddingBottom="11dp"
     android:gravity="center_vertical"
     android:clickable="true"
     android:focusable="true">
@@ -20,8 +23,10 @@
         android:text="PDF"
         android:textSize="10sp"
         android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:letterSpacing="0.05"
         android:textColor="@color/ru_crimson"
-        android:background="@drawable/bg_result_thumb"
+        android:background="@drawable/bg_result_thumb_pdf"
         android:maxLines="1"/>
 
     <LinearLayout
@@ -72,7 +77,8 @@
         android:layout_width="18dp"
         android:layout_height="18dp"
         android:src="@drawable/ic_chevron_right"
-        app:tint="@color/text_hint"
+        android:alpha="0.55"
+        app:tint="@color/text_secondary"
         android:contentDescription="@null"/>
 
     <TextView

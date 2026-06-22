@@ -22,6 +22,7 @@
 
     <!-- Component fills (light) -->
     <color name="ru_search_bar_fill">#FFF8F0E3</color>
+    <color name="ru_search_bar_shadow">#33785614</color>
     <color name="ru_nav_bar_fill">#E0FFFFFF</color>
     <color name="ru_loading_scrim">#CCF5EDE8</color>
     <color name="ru_skeleton_fill">#12000000</color>
@@ -29,6 +30,14 @@
     <color name="ru_focus_ring">#38C41E3A</color>
     <color name="ru_settings_icon_bg">#0D000000</color>
     <color name="ru_init_banner">#F5EDE8</color>
+    <color name="ru_theme_toggle_shadow">#47000000</color>
+    <color name="theme_toggle_icon_inactive">#757575</color>
+    <color name="theme_toggle_track">#14000000</color>
+    <color name="theme_toggle_thumb">#FFFFFF</color>
+    <color name="theme_toggle_icon_active">#1A1530</color>
+    <color name="ru_chip_fill">#0D000000</color>
+    <color name="ru_result_row_shadow">#14785614</color>
+    <color name="ru_crimson_accent_deep">#A81830</color>
 
     <!-- Category colors -->
     <color name="cat_work">#3B65DC</color>

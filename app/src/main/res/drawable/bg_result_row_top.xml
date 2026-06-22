@@ -1,16 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:left="3dp">
+    <!-- Soft lift beneath the card -->
+    <item
+        android:left="1dp"
+        android:top="2dp"
+        android:right="1dp"
+        android:bottom="0dp">
         <shape android:shape="rectangle">
-            <solid android:color="@color/ru_crimson"/>
-            <corners android:radius="18dp"/>
+            <solid android:color="@color/ru_result_row_shadow"/>
+            <corners android:radius="@dimen/result_row_radius"/>
         </shape>
     </item>
+
+    <!-- Crimson shell — visible on the curved left edge -->
     <item>
         <shape android:shape="rectangle">
+            <gradient
+                android:angle="0"
+                android:endColor="@color/ru_crimson"
+                android:startColor="@color/ru_crimson_accent_deep"
+                android:type="linear"/>
+            <corners android:radius="@dimen/result_row_radius"/>
+        </shape>
+    </item>
+
+    <!-- Card face: inset left so the accent hugs the outer contour -->
+    <item android:left="@dimen/result_row_accent_width">
+        <shape android:shape="rectangle">
             <solid android:color="@color/ru_bg"/>
-            <corners android:radius="18dp"/>
-            <stroke android:width="1dp" android:color="@color/divider"/>
+            <corners
+                android:bottomLeftRadius="@dimen/result_row_inner_left_radius"
+                android:bottomRightRadius="@dimen/result_row_radius"
+                android:topLeftRadius="@dimen/result_row_inner_left_radius"
+                android:topRightRadius="@dimen/result_row_radius"/>
+        </shape>
+    </item>
+
+    <!-- Hairline border over the full card -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent"/>
+            <corners android:radius="@dimen/result_row_radius"/>
+            <stroke
+                android:width="1dp"
+                android:color="@color/divider"/>
         </shape>
     </item>
 </layer-list>

@@ -30,4 +30,19 @@
     <dimen name="index_buckets_margin_top">22dp</dimen>
     <dimen name="index_button_margin_top">26dp</dimen>
     <dimen name="index_phase_text_size">12sp</dimen>
+
+    <!-- Icon sizes (handoff) -->
+    <dimen name="ru_search_glyph_size">22dp</dimen>
+    <dimen name="ru_settings_icon_tile">36dp</dimen>
+    <dimen name="ru_settings_icon_glyph">20dp</dimen>
+    <dimen name="ru_nav_icon_size">25dp</dimen>
+    <dimen name="ru_theme_toggle_btn_w">42dp</dimen>
+    <dimen name="ru_theme_toggle_btn_h">32dp</dimen>
+    <dimen name="ru_theme_toggle_pad">5dp</dimen>
+    <dimen name="ru_theme_toggle_icon">18dp</dimen>
+
+    <!-- Result row card (handoff: 18px radius, ~4–5px accent) -->
+    <dimen name="result_row_radius">18dp</dimen>
+    <dimen name="result_row_accent_width">5dp</dimen>
+    <dimen name="result_row_inner_left_radius">13dp</dimen>
 </resources>

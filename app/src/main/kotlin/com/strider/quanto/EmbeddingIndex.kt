@@ -25,6 +25,8 @@ class EmbeddingIndex {
 
     val isWarm: Boolean get() = state == State.WARM && rowCount > 0
 
+    val cachedCount: Int get() = rowCount
+
     fun clear() {
         synchronized(lock) {
             state = State.COLD

@@ -313,23 +313,25 @@ data class FileMetadata(
     val ownerConfidence: Float = 0f,
     val pdfMetadata: Map<String, String> = emptyMap(),
     /** Party/person names — searchable via SQL; kept out of embed string. */
-    val extractedEntities: List<String> = emptyList()
+    val extractedEntities: List<String> = emptyList(),
+    /** Scanned PDF flagged for deferred OCR during fast index pass. */
+    val pdfNeedsOcr: Boolean = false
 )
 
 // ─────────────────────────────────────────────
 // Master metadata builder
 // ─────────────────────────────────────────────
 
-fun buildFileMetadata(file: File): FileMetadata {
+fun buildFileMetadata(file: File, ocrText: String? = null, pdfBundle: PdfExtract? = null): FileMetadata {
     val ext        = file.extension.lowercase()
     val typeLabel  = getTypeLabel(ext)
     val sizeBucket = getSizeBucket(file.length())
     val ageBucket  = getAgeBucket(file.lastModified())
     val entities   = extractFilenameEntities(file.nameWithoutExtension)
 
-    val pdfBundle = if (ext == "pdf") {
+    val resolvedPdfBundle = pdfBundle ?: if (ext == "pdf") {
         try {
-            extractPdfBundle(file)
+            extractPdfBundle(file, ocrText)
         } catch (e: Exception) {
             Log.w(TAG, "PDF bundle failed for ${file.name}: ${e.message}")
             PdfExtract(null, emptyMap(), null)
@@ -338,7 +340,7 @@ fun buildFileMetadata(file: File): FileMetadata {
 
     val contentSnip = try {
         when {
-            pdfBundle != null -> pdfBundle.contentSnippet
+            resolvedPdfBundle != null -> resolvedPdfBundle.contentSnippet
             else -> extractContent(file)
         }
     } catch (e: Exception) {
@@ -348,19 +350,19 @@ fun buildFileMetadata(file: File): FileMetadata {
 
     val categories = classifyCategories(file, contentSnip)
 
-    val pdfMeta = pdfBundle?.metadata ?: emptyMap()
+    val pdfMeta = resolvedPdfBundle?.metadata ?: emptyMap()
     val pdfTitle = pdfMeta["title"]?.takeIf { it.isNotBlank() }
 
     val rawTextForNames = when {
-        pdfBundle?.rawText != null -> pdfBundle.rawText
+        resolvedPdfBundle?.rawText != null -> resolvedPdfBundle.rawText
         else -> extractRawTextForOwnerNames(file)
     }
     val ownerEntities = extractOwnerNames(file, rawTextForNames, pdfMeta)
     val ownerConfidence = OwnerMatcher.primaryConfidence(ownerEntities)
 
     val entitySourceText = when {
-        pdfBundle?.entityRawText != null -> pdfBundle.entityRawText
-        pdfBundle?.rawText != null -> pdfBundle.rawText
+        resolvedPdfBundle?.entityRawText != null -> resolvedPdfBundle.entityRawText
+        resolvedPdfBundle?.rawText != null -> resolvedPdfBundle.rawText
         else -> rawTextForNames
     }
     val extractedEntities = buildExtractedEntities(entitySourceText, ownerEntities)
@@ -387,6 +389,7 @@ fun buildFileMetadata(file: File): FileMetadata {
         ownerEntities     = ownerEntities,
         ownerConfidence   = ownerConfidence,
         pdfMetadata       = pdfMeta,
-        extractedEntities = extractedEntities
+        extractedEntities = extractedEntities,
+        pdfNeedsOcr       = resolvedPdfBundle?.needsOcr == true
     )
 }

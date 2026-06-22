@@ -29,6 +29,8 @@
     <string name="btn_reindex">Re-index</string>
     <string name="btn_search">Search</string>
     <string name="nav_home">Home</string>
+    <string name="theme_light">Light theme</string>
+    <string name="theme_dark">Dark theme</string>
     <string name="nav_index">Index</string>
     <string name="nav_settings">Settings</string>
     <string name="nav_analytics">Analytics</string>
@@ -85,7 +87,7 @@
     <string name="settings_multilingual">Multilingual</string>
     <string name="settings_multilingual_sub">Hindi, English and more</string>
     <string name="settings_content">Read file content</string>
-    <string name="settings_content_sub">Extract text from documents</string>
+    <string name="settings_content_sub">Extract text from PDFs including scans</string>
     <string name="settings_max_files">Max files: 5,000</string>
     <string name="settings_max_files_sub">Documents indexed first</string>
     <string name="settings_model">Model</string>
@@ -122,4 +124,6 @@
     <string name="notification_channel_indexing_desc">Shows progress while files are being indexed</string>
     <string name="notification_indexing_title">RU · Indexing files</string>
     <string name="notification_indexing_body">%d files indexed so far</string>
+    <string name="notification_ocr_title">RU · Reading scanned documents</string>
+    <string name="notification_ocr_body">%d documents queued</string>
 </resources>

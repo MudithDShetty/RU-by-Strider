@@ -1,6 +1,5 @@
 package com.strider.quanto
 
-import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.SpannableString
@@ -83,33 +82,56 @@ class ResultsAdapter(
         val result = getItem(position)
         val file = result.file
         val ctx = holder.itemView.context
+        val extUpper = file.extension.uppercase().take(4).ifBlank { "FILE" }
 
         with(holder.binding) {
             tvFileName.text = highlightName(file.name, query, ctx)
-            tvExtension.text = file.extension.uppercase().take(4)
+            tvExtension.text = extUpper
 
-            val folder = file.path.substringBeforeLast("/", "")
-                .substringAfterLast("/", "")
-                .ifBlank { "Files" }
-            tvFileSub.text = "${folder} · ${file.metadata.typeLabel} · ${file.displaySize} · ${file.metadata.ageBucket}"
+            val source = RuUi.sourceLabelFromPath(file.path)
+            val date = RuUi.formatResultDate(file.lastModified)
+            tvFileSub.text = buildString {
+                append(source)
+                append(" · ")
+                append(extUpper)
+                append(" · ")
+                append(RuUi.formatDisplaySize(file.sizeBytes))
+                if (date.isNotBlank()) {
+                    append(" · ")
+                    append(date)
+                }
+            }
 
-            val dotColor = categoryColor(file.categories.firstOrNull())
-            holder.bindSourceDot(dotColor)
+            holder.bindSourceDot(RuUi.sourceDotColor(ctx, source))
+
+            applyThumbStyle(extUpper)
 
             root.setBackgroundResource(
                 when {
                     shareMode && file.path == selectedPath -> R.drawable.bg_file_card_selected
-                    !shareMode && position == 0 -> R.drawable.bg_result_row_top
-                    else -> R.drawable.bg_result_row
+                    else -> R.drawable.bg_result_row_top
                 }
             )
             root.setOnClickListener { onItemClick(result) }
         }
     }
 
+    private fun ItemResultBinding.applyThumbStyle(extUpper: String) {
+        val isImage = extUpper in IMAGE_EXTS
+        tvExtension.setBackgroundResource(
+            if (isImage) R.drawable.bg_result_thumb_image else R.drawable.bg_result_thumb_pdf
+        )
+        tvExtension.setTextColor(
+            ContextCompat.getColor(
+                root.context,
+                if (isImage) R.color.text_secondary else R.color.ru_crimson
+            )
+        )
+    }
+
     private fun highlightName(name: String, rawQuery: String, ctx: android.content.Context): CharSequence {
         if (rawQuery.isBlank()) return name
-        val tokens = rawQuery.split(Regex("\\s+")).filter { it.length >= 2 }
+        val tokens = rawQuery.split(Regex("\\s+")).filter { it.isNotEmpty() }
         if (tokens.isEmpty()) return name
         val spannable = SpannableString(name)
         val crimson = ContextCompat.getColor(ctx, R.color.ru_crimson)
@@ -125,18 +147,8 @@ class ResultsAdapter(
         return spannable
     }
 
-    private fun categoryColor(category: Category?): Int = CATEGORY_COLORS[category ?: Category.GENERAL]
-        ?: CATEGORY_COLORS.getValue(Category.GENERAL)
-
     companion object {
-        private val CATEGORY_COLORS = mapOf(
-            Category.IDENTITY to Color.parseColor("#C41E3A"),
-            Category.WORK to Color.parseColor("#3B65DC"),
-            Category.EDUCATION to Color.parseColor("#8B6200"),
-            Category.PERSONAL to Color.parseColor("#0D9E76"),
-            Category.MEDIA to Color.parseColor("#7C3AED"),
-            Category.GENERAL to Color.parseColor("#888888"),
-        )
+        private val IMAGE_EXTS = setOf("JPG", "JPEG", "PNG", "GIF", "WEBP", "HEIC")
 
         private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<SearchResult>() {
             override fun areItemsTheSame(a: SearchResult, b: SearchResult) =

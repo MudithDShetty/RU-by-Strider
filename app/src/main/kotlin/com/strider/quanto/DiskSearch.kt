@@ -11,29 +11,44 @@ private const val TAG = "DiskSearch"
  */
 object DiskSearch {
 
-    fun gatherCandidatePaths(db: DatabaseHelper, query: EnrichedQuery): List<String> =
-        gatherCandidatePathsInternal(db, query, expanded = false)
+    fun gatherCandidatePaths(
+        db: DatabaseHelper,
+        query: EnrichedQuery,
+        filenamePaths: List<String>? = null,
+        contentPaths: List<String>? = null,
+        totalCount: Int? = null
+    ): List<String> =
+        gatherCandidatePathsInternal(db, query, expanded = false, filenamePaths, contentPaths, totalCount)
 
-    fun gatherExpandedCandidatePaths(db: DatabaseHelper, query: EnrichedQuery): List<String> =
-        gatherCandidatePathsInternal(db, query, expanded = true)
+    fun gatherExpandedCandidatePaths(
+        db: DatabaseHelper,
+        query: EnrichedQuery,
+        filenamePaths: List<String>? = null,
+        contentPaths: List<String>? = null,
+        totalCount: Int? = null
+    ): List<String> =
+        gatherCandidatePathsInternal(db, query, expanded = true, filenamePaths, contentPaths, totalCount)
 
     private fun gatherCandidatePathsInternal(
         db: DatabaseHelper,
         query: EnrichedQuery,
-        expanded: Boolean
+        expanded: Boolean,
+        preFilenamePaths: List<String>? = null,
+        preContentPaths: List<String>? = null,
+        preTotalCount: Int? = null
     ): List<String> {
-        val totalCount = db.getTotalCount()
+        val totalCount = preTotalCount ?: db.getTotalCount()
         val ftsLimit = RetrievalScaling.ftsLimit(totalCount, expanded)
         val catLimit = RetrievalScaling.categoryLimit(totalCount, expanded)
         val maxPaths = RetrievalScaling.maxCandidatePaths(totalCount, expanded)
 
         val paths = linkedSetOf<String>()
 
-        val filenamePaths = FilenameSearch.gatherPaths(db, query)
+        val filenamePaths = preFilenamePaths ?: FilenameSearch.gatherPaths(db, query)
         filenamePaths.forEach { paths.add(it) }
         Log.d(TAG, "Filename candidates: ${filenamePaths.size}")
 
-        val contentPaths = ContentSearch.gatherPaths(db, query)
+        val contentPaths = preContentPaths ?: ContentSearch.gatherPaths(db, query)
         contentPaths.forEach { paths.add(it) }
         Log.d(TAG, "Content candidates: ${contentPaths.size}")
 
