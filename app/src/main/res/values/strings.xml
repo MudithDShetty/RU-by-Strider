@@ -3,8 +3,8 @@
     <string name="app_name">RU</string>
     <string name="tagline_en">search anything, anywhere</string>
     <string name="tagline_hi">कुछ भी, कहीं भी खोजें</string>
-    <string name="hint_search_en">Search files, photos, bills…</string>
-    <string name="hint_search_hi">फ़ाइलें, फ़ोटो, बिल खोजें…</string>
+    <string name="hint_search_en">Search files, photos, bills, documents, notes, and more…</string>
+    <string name="hint_search_hi">फ़ाइलें, फ़ोटो, बिल, दस्तावेज़, नोट्स और बहुत कुछ खोजें…</string>
     <string name="search_mic_hint_idle">Tap the mic and just speak</string>
     <string name="search_mic_hint_listening">सुन रहा है · listening…</string>
     <string name="results_searching">Searching…</string>

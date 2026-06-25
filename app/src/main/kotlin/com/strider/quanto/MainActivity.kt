@@ -45,6 +45,7 @@ import com.strider.quanto.databinding.ItemBucketChipBinding
 import com.strider.quanto.eval.AnalyticsEventAdapter
 import com.strider.quanto.eval.EvalLiveFeed
 import com.strider.quanto.eval.EvalLogger
+import com.strider.quanto.ui.SearchHintScroller
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -88,6 +89,7 @@ class MainActivity : AppCompatActivity() {
     private var hintDotAnimator: ObjectAnimator? = null
     private lateinit var skeletonAdapter: SkeletonResultsAdapter
     private lateinit var homeResultsUi: HomeResultsUi
+    private lateinit var searchHintScroller: SearchHintScroller
 
     private lateinit var prefs: SharedPreferences
     private lateinit var voiceSearchManager: VoiceSearchManager
@@ -410,6 +412,13 @@ class MainActivity : AppCompatActivity() {
         homeBinding.btnMic.isEnabled = false
         homeBinding.btnSearch.isEnabled = false
 
+        searchHintScroller = SearchHintScroller(
+            host = homeBinding.flSearchInputHost,
+            placeholder = homeBinding.tvSearchPlaceholder,
+            editText = homeBinding.etSearch,
+            hintText = getString(R.string.hint_search_en),
+        )
+
         homeBinding.etSearch.apply {
             isFocusable = true
             isFocusableInTouchMode = true
@@ -426,6 +435,7 @@ class MainActivity : AppCompatActivity() {
                     userDismissedSearchFocus = false
                     val text = s?.toString()?.trim() ?: ""
                     syncSearchActionButton()
+                    searchHintScroller.sync()
                     cancelSearchDebounce()
                     if (text.length < 2) {
                         if (::homeResultsUi.isInitialized && homeResultsUi.isResultsMode()) {
@@ -457,8 +467,12 @@ class MainActivity : AppCompatActivity() {
                     homeBinding.llSearchBar.setBackgroundResource(R.drawable.bg_search_bar)
                 }
                 syncSearchActionButton()
+                searchHintScroller.sync()
             }
         }
+
+        searchHintScroller.sync()
+        homeBinding.root.post { searchHintScroller.sync() }
 
         homeBinding.llSearchBar.setOnClickListener {
             focusSearchField()
@@ -740,9 +754,17 @@ class MainActivity : AppCompatActivity() {
         if (shouldRun) {
             startTaglineCycle()
             startMicIdleAnimation()
+            if (homeBinding.etSearch.text.isNullOrEmpty() && !homeBinding.etSearch.hasFocus()) {
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+                if (!imm.isActive(homeBinding.etSearch)) {
+                    homeBinding.etSearch.clearFocus()
+                }
+            }
+            if (::searchHintScroller.isInitialized) searchHintScroller.setDecorEnabled(true)
         } else {
             stopTaglineCycle()
             if (!voiceActive) stopMicIdleAnimation()
+            if (::searchHintScroller.isInitialized) searchHintScroller.setDecorEnabled(false)
         }
     }
 
@@ -1563,6 +1585,7 @@ class MainActivity : AppCompatActivity() {
         }
         syncSearchActionButton()
         syncHomeDecorAnimations()
+        if (::searchHintScroller.isInitialized) searchHintScroller.sync()
     }
 
     private fun startMicListeningRings() {
@@ -1759,10 +1782,12 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         syncHomeDecorAnimations()
+        if (::searchHintScroller.isInitialized) searchHintScroller.sync()
     }
 
     override fun onPause() {
         stopTaglineCycle()
+        if (::searchHintScroller.isInitialized) searchHintScroller.stop()
         if (!::voiceSearchManager.isInitialized || !voiceSearchManager.isListening) {
             stopMicIdleAnimation()
             stopMicListeningRings()
@@ -1783,6 +1808,7 @@ class MainActivity : AppCompatActivity() {
         stopMicListeningRings()
         stopHintDotBlink()
         stopTaglineCycle()
+        if (::searchHintScroller.isInitialized) searchHintScroller.destroy()
         taglineHandler.removeCallbacksAndMessages(null)
         searchFocusHandler.removeCallbacksAndMessages(null)
         cancelSearchDebounce()
