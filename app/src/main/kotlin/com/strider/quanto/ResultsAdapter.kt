@@ -6,13 +6,17 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
+import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.strider.quanto.databinding.ItemResultBinding
+import java.io.File
 
 class ResultsAdapter(
     private val onItemClick: (SearchResult) -> Unit
@@ -64,6 +68,7 @@ class ResultsAdapter(
 
         init {
             binding.vSourceDot.background = sourceDotDrawable
+            FilePreviewLoader.applyThumbClip(binding.flThumb)
         }
 
         fun bindSourceDot(color: Int) {
@@ -86,7 +91,6 @@ class ResultsAdapter(
 
         with(holder.binding) {
             tvFileName.text = highlightName(file.name, query, ctx)
-            tvExtension.text = extUpper
 
             val source = RuUi.sourceLabelFromPath(file.path)
             val date = RuUi.formatResultDate(file.lastModified)
@@ -103,8 +107,7 @@ class ResultsAdapter(
             }
 
             holder.bindSourceDot(RuUi.sourceDotColor(ctx, source))
-
-            applyThumbStyle(extUpper)
+            bindThumb(this, extUpper, file)
 
             root.setBackgroundResource(
                 when {
@@ -116,17 +119,60 @@ class ResultsAdapter(
         }
     }
 
-    private fun ItemResultBinding.applyThumbStyle(extUpper: String) {
+    override fun onViewRecycled(holder: ViewHolder) {
+        super.onViewRecycled(holder)
+        with(holder.binding) {
+            FilePreviewLoader.clearPreview(ivPreview, tvExtensionFallback)
+        }
+    }
+
+    private fun bindThumb(binding: ItemResultBinding, extUpper: String, file: IndexedFile) {
         val isImage = extUpper in IMAGE_EXTS
-        tvExtension.setBackgroundResource(
-            if (isImage) R.drawable.bg_result_thumb_image else R.drawable.bg_result_thumb_pdf
+        binding.flThumb.setBackgroundResource(
+            when {
+                isImage -> R.drawable.bg_result_thumb_image
+                else -> R.drawable.bg_result_thumb_pdf
+            }
         )
-        tvExtension.setTextColor(
-            ContextCompat.getColor(
-                root.context,
-                if (isImage) R.color.text_secondary else R.color.ru_crimson
+
+        FilePreviewLoader.clearPreview(binding.ivPreview, binding.tvExtensionFallback)
+
+        if (FilePreviewLoader.supportsPreview(extUpper)) {
+            FilePreviewLoader.loadPreview(
+                imageView = binding.ivPreview,
+                fallbackView = binding.tvExtensionFallback,
+                file = File(file.path),
+                extUpper = extUpper,
+                lastModified = file.lastModified,
             )
-        )
+        } else {
+            showCenteredFallback(binding, extUpper, isImage)
+        }
+    }
+
+    private fun showCenteredFallback(binding: ItemResultBinding, extUpper: String, isImage: Boolean) {
+        binding.ivPreview.setImageDrawable(null)
+        binding.tvExtensionFallback.apply {
+            text = extUpper
+            textSize = 10f
+            setBackgroundResource(0)
+            setPadding(0, 0, 0, 0)
+            setTextColor(
+                ContextCompat.getColor(
+                    context,
+                    when {
+                        isImage -> R.color.text_secondary
+                        extUpper in OFFICE_EXTS -> R.color.ru_amber
+                        else -> R.color.ru_crimson
+                    }
+                )
+            )
+            layoutParams = (layoutParams as FrameLayout.LayoutParams).apply {
+                gravity = Gravity.CENTER
+                setMargins(0, 0, 0, 0)
+            }
+            visibility = View.VISIBLE
+        }
     }
 
     private fun highlightName(name: String, rawQuery: String, ctx: android.content.Context): CharSequence {
@@ -149,6 +195,7 @@ class ResultsAdapter(
 
     companion object {
         private val IMAGE_EXTS = setOf("JPG", "JPEG", "PNG", "GIF", "WEBP", "HEIC")
+        private val OFFICE_EXTS = setOf("DOC", "DOCX", "PPT", "PPTX")
 
         private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<SearchResult>() {
             override fun areItemsTheSame(a: SearchResult, b: SearchResult) =

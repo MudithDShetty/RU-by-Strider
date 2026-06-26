@@ -45,4 +45,11 @@
     <dimen name="result_row_radius">18dp</dimen>
     <dimen name="result_row_accent_width">5dp</dimen>
     <dimen name="result_row_inner_left_radius">13dp</dimen>
+    <dimen name="result_thumb_size">60dp</dimen>
+    <dimen name="result_thumb_radius">13dp</dimen>
+    <dimen name="result_thumb_fallback_text">8sp</dimen>
+    <dimen name="result_file_name_text_size">16sp</dimen>
+    <dimen name="result_file_meta_text_size">12sp</dimen>
+    <dimen name="result_file_meta_gap">5dp</dimen>
+    <dimen name="result_file_name_min_height">22dp</dimen>
 </resources>

@@ -76,6 +76,7 @@ class StriderApp : Application() {
         RuTheme.applyStored(this)
         super.onCreate()
         instance = this
+        FilePreviewLoader.init(this)
         EvalLogger.init(this)
         createNotificationChannel()
         startEngineInit()

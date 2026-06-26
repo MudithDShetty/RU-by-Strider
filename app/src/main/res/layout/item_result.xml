@@ -15,25 +15,42 @@
     android:clickable="true"
     android:focusable="true">
 
-    <TextView
-        android:id="@+id/tvExtension"
-        android:layout_width="50dp"
-        android:layout_height="50dp"
-        android:gravity="center"
-        android:text="PDF"
-        android:textSize="10sp"
-        android:textStyle="bold"
-        android:fontFamily="monospace"
-        android:letterSpacing="0.05"
-        android:textColor="@color/ru_crimson"
-        android:background="@drawable/bg_result_thumb_pdf"
-        android:maxLines="1"/>
+    <FrameLayout
+        android:id="@+id/flThumb"
+        android:layout_width="@dimen/result_thumb_size"
+        android:layout_height="@dimen/result_thumb_size"
+        android:background="@drawable/bg_result_thumb_pdf">
+
+        <ImageView
+            android:id="@+id/ivPreview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:contentDescription="@null"/>
+
+        <TextView
+            android:id="@+id/tvExtensionFallback"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:text="PDF"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.05"
+            android:textColor="@color/ru_crimson"
+            android:maxLines="1"
+            android:visibility="gone"/>
+    </FrameLayout>
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
+        android:minHeight="@dimen/result_thumb_size"
         android:orientation="vertical"
+        android:gravity="center_vertical"
         android:paddingStart="13dp"
         android:paddingEnd="8dp">
 
@@ -41,7 +58,10 @@
             android:id="@+id/tvFileName"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="15sp"
+            android:minHeight="@dimen/result_file_name_min_height"
+            android:gravity="center_vertical"
+            android:textSize="@dimen/result_file_name_text_size"
+            android:lineSpacingExtra="2dp"
             android:fontFamily="@font/hanken_grotesk_medium"
             android:textColor="@color/text_primary"
             android:maxLines="1"
@@ -52,7 +72,7 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginTop="3dp">
+            android:layout_marginTop="@dimen/result_file_meta_gap">
 
             <View
                 android:id="@+id/vSourceDot"
@@ -65,7 +85,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="6dp"
-                android:textSize="12sp"
+                android:textSize="@dimen/result_file_meta_text_size"
                 android:textColor="@color/text_secondary"
                 android:fontFamily="@font/hanken_grotesk_regular"
                 android:maxLines="1"
