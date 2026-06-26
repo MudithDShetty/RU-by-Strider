@@ -224,7 +224,13 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             Log.d(TAG, "Embedding cache already warm ($dbCount vectors)")
             return
         }
-        embeddingIndex.loadFrom(this)
+        try {
+            if (embeddingIndex.isWarm) embeddingIndex.clear()
+            embeddingIndex.loadFrom(this)
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "OOM warming embedding cache ($dbCount files)", e)
+            embeddingIndex.clear()
+        }
     }
 
     fun isEmbeddingCacheWarm(): Boolean = embeddingIndex.isWarm

@@ -720,7 +720,7 @@ Entities stored in `entities` column (comma-separated, lowercase) and included i
 | **Layers / heads** | 12 / 12 |
 | **Vocab size** | 180,000 (BPE) |
 | **Output** | Mean-pooled, L2-normalized 384-dim vector |
-| **ONNX asset** | `app/src/main/assets/embedding_model.onnx` (~390 MB) |
+| **ONNX asset** | Play Asset Delivery fast-follow pack `embeddingmodel` (~390 MB); debug fallback in `app/src/debug/assets/` |
 | **Tokenizer** | `tokenizer.json` + `tokenizer_config.json` |
 
 ### Inference Parameters
@@ -814,7 +814,8 @@ Debug builds (`BuildConfig.EVAL_LOGGING = true`) write structured NDJSON events 
 | Event | File | Key fields |
 |-------|------|------------|
 | `search_completed` | `events/search_YYYY-MM-DD.jsonl` | query, retrieval metrics, results, timing, debug_target, golden_eval |
-| `index_completed` | `events/index_YYYY-MM-DD.jsonl` | indexed/skipped/deleted counts, duration, category breakdown |
+| `index_completed` | `events/index_YYYY-MM-DD.jsonl` | indexed/skipped/deleted counts, duration, category breakdown, `phases` array |
+| `index_phase` | `events/index_YYYY-MM-DD.jsonl` | phase name, started_at, ended_at, duration_ms, file_count (wall-clock per indexing step) |
 | `index_worker` | `events/index_YYYY-MM-DD.jsonl` | status, wait_for_model_ms, error |
 | `init_phase` | `events/init_YYYY-MM-DD.jsonl` | phase, progress, duration_ms, first_model_load |
 | `result_clicked` | `events/search_YYYY-MM-DD.jsonl` | query, clicked_rank, top1_path |
@@ -831,9 +832,9 @@ adb pull /data/data/com.strider.quanto/files/ru_eval ./analytics_data
 
 The Analytics tab (debug only) shows:
 
-- System status: index count, embedding cache warm/cold
+- System status: index count, embedding cache warm/cold, last index phase timestamps
 - Last search query and top result
-- Live scrolling event feed via `EvalLiveFeed`
+- Live scrolling event feed via `EvalLiveFeed` (includes `index_phase` rows with start/end times for scan, metadata, embedding, persist)
 
 ---
 
@@ -872,16 +873,22 @@ All retrieval constants live in `SearchWeights.kt`. Change values only after gol
 
 ```text
 StriderQuanto/
+├── embeddingmodel/                      # Play Asset Delivery fast-follow pack (~390 MB ONNX)
+│   ├── build.gradle
+│   └── src/main/assets/
+│       └── embedding_model.onnx         # Synced at build from model_assets/ (not in git)
 ├── app/
-│   ├── build.gradle                     # Dependencies, EVAL_LOGGING flag, noCompress onnx
+│   ├── build.gradle                     # assetPacks, Play Core, MODEL_BYTES BuildConfig
 │   └── src/
+│       ├── debug/assets/
+│       │   └── embedding_model.onnx     # Debug-only bundled fallback (not in git)
 │       ├── main/
 │       │   ├── AndroidManifest.xml
 │       │   ├── assets/
-│       │   │   ├── embedding_model.onnx # ~390 MB — not in git by default
 │       │   │   ├── tokenizer.json
 │       │   │   └── tokenizer_config.json
 │       │   ├── kotlin/com/strider/quanto/
+│       │   │   ├── ModelAssetDelivery.kt    # PAD fetch + copy to filesDir
 │       │   │   ├── StriderApp.kt            # Application lifecycle, workers, cache warm
 │       │   │   ├── MainActivity.kt          # Four-screen shell, unified search
 │       │   │   ├── HomeResultsUi.kt         # Results sheet UX
@@ -964,39 +971,48 @@ StriderQuanto/
 
 ### 1. Place Model Assets
 
-The ONNX model is not committed to git (size). Copy from `model_assets/` into the app assets folder:
+The ONNX model is not committed to git (size). For **local debug builds**, Gradle syncs it automatically from `model_assets/` into `app/src/debug/assets/` when you run `assembleDebug`.
 
-**Windows (PowerShell):**
+**Windows (PowerShell) — one-time setup:**
 
 ```powershell
-Copy-Item "model_assets\onnx\model.onnx" "app\src\main\assets\embedding_model.onnx"
-Copy-Item "model_assets\tokenizer.json" "app\src\main\assets\tokenizer.json"
-Copy-Item "model_assets\tokenizer_config.json" "app\src\main\assets\tokenizer_config.json"
+Copy-Item "model_assets\onnx\model.onnx" "app\src\debug\assets\embedding_model.onnx" -Force
+Copy-Item "model_assets\tokenizer.json" "app\src\main\assets\tokenizer.json" -Force
+Copy-Item "model_assets\tokenizer_config.json" "app\src\main\assets\tokenizer_config.json" -Force
 ```
 
 **macOS / Linux:**
 
 ```bash
-cp model_assets/onnx/model.onnx app/src/main/assets/embedding_model.onnx
+mkdir -p app/src/debug/assets
+cp model_assets/onnx/model.onnx app/src/debug/assets/embedding_model.onnx
 cp model_assets/tokenizer.json app/src/main/assets/tokenizer.json
 cp model_assets/tokenizer_config.json app/src/main/assets/tokenizer_config.json
 ```
+
+> **Release / Play Store:** The model lives in the `embeddingmodel` asset pack (fast-follow), not in the base APK. Build with `bundleRelease` and upload the AAB to Play Console.
 
 > **Note:** `aaptOptions { noCompress "onnx" }` in `app/build.gradle` prevents APK compression so ONNX Runtime can memory-map the model efficiently.
 
 ### 2. Build
 
+**Debug** (bundled model fallback for sideload / adb install):
+
 ```bash
 ./gradlew assembleDebug
 ```
 
-Or in Android Studio: **Build → Make Project**.
-
-Debug builds enable eval logging and the Analytics tab. Release builds disable both:
+**Release AAB** (model in Play Asset Delivery pack):
 
 ```bash
-./gradlew assembleRelease
+./gradlew bundleRelease
 ```
+
+Output: `app/build/outputs/bundle/release/app-release.aab`
+
+Or in Android Studio: **Build → Generate Signed Bundle / APK**.
+
+Debug builds enable eval logging and the Analytics tab. Release builds disable both.
 
 ### 3. Install & Run
 
@@ -1009,11 +1025,36 @@ Connect a device via USB (USB debugging enabled) or use an emulator with shared 
 ### 4. First Run Checklist
 
 1. **Grant storage permission** — on Android 11+, enable "All files access" when prompted (`MANAGE_EXTERNAL_STORAGE`).
-2. **Wait for model setup** — first launch copies ~390 MB to internal storage (4–8 s on mid-range hardware). You can browse Settings/onboarding while setup runs.
+2. **Wait for model setup** — first launch downloads ~390 MB via Play Asset Delivery (or copies bundled model in debug). Progress shown in onboarding setup card. You can browse Settings/onboarding while setup runs.
 3. **Set your name** (optional) — improves *"my Aadhaar"*, *"mera PAN"* style queries. Stored locally only.
 4. **Tap "Index"** — background indexing starts with a persistent notification. You may close the app; WorkManager continues.
 5. **Search** — type naturally; results update as you type using the full hybrid pipeline. No need to press Search.
 6. **OCR backfill** — weak PDFs are OCR'd automatically ~90s after startup (if "Read file content" is enabled).
+
+### 5. Play Store / Asset Delivery Testing
+
+Play Asset Delivery **only works when the app is installed from Google Play**, not via `adb install` of a local APK.
+
+1. Build release AAB: `./gradlew bundleRelease`
+2. Upload `app/build/outputs/bundle/release/app-release.aab` to **Play Console → Internal testing**
+3. Install from the Play Store test link on a physical device
+4. Confirm Play listing shows ~35 MB install size; fast-follow downloads the model pack after install
+5. Open Ru — setup card shows download progress if the pack is not yet local
+6. Second launch — model in `filesDir`; engine ready in <1 s
+
+**Regression checklist (golden queries, same FP32 model):**
+
+| Query | Expected | Pass? |
+|-------|----------|-------|
+| `nda quantoo` | `NDA- Quantoo .pdf` at #1 | |
+| `Tanuj` | NDA in top 3 | |
+| `Nikharv` | NDA in top 3 | |
+
+Compare search latency in logcat (`SearchPipeline`, `EmbeddingEngine`) before vs after PAD — should match pre-PAD builds once the model is local.
+
+```bash
+adb logcat -s ModelAssetDelivery StriderApp EmbeddingEngine SearchPipeline
+```
 
 ---
 
@@ -1065,7 +1106,8 @@ Benchmarks below are **engineering targets and measured estimates** from develop
 
 | Scenario | Time | Notes |
 |----------|------|-------|
-| First install — model copy + session create | **4–8 s** | One-time; progress shown in UI |
+| First install — model download + session create | **1–5 min download** + **4–8 s load** | One-time; Play fast-follow + setup card progress |
+| First install (debug sideload) — bundled copy | **4–8 s** | Debug fallback copies from APK assets |
 | Subsequent app opens | **< 1 s to ready** | Session persists in `StriderApp` process |
 | Embedding cache warm (24k files) | **~2–5 s** | Parallel with model load on startup |
 | Warmup inference (`embed("warmup")`) | **~200–400 ms** | JIT-compiles inference path after init |
@@ -1221,7 +1263,8 @@ Extensions indexed (in priority order within each tier):
 
 | Issue | Likely cause | Fix |
 |-------|--------------|-----|
-| "Setup failed — restart app" | Model assets missing or corrupt | Re-copy `embedding_model.onnx` and tokenizer files to assets; rebuild |
+| "Setup failed — restart app" | Model download failed or corrupt | Tap **Retry download** on setup card; check Wi‑Fi. Debug: re-copy model to `app/src/debug/assets/` |
+| PAD download stuck on mobile data | Play requires consent for 200 MB+ | Tap **Retry download** — accepts Play's mobile-data dialog |
 | Index stays at 0 | Storage permission not granted | Settings → Apps → RU → Permissions → Allow all files access |
 | Search returns nothing | Index empty or query too vague | Run Index; try simpler keywords first |
 | Slow first search after install | Embedding cache cold | Normal; second search uses warm RAM cache |

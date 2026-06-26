@@ -104,7 +104,9 @@
     <string name="settings_your_name_not_set">Not set — tap to add</string>
     <string name="onboarding_setup_label">One-time setup</string>
     <string name="onboarding_setup_title">Getting RU ready</string>
-    <string name="onboarding_setup_sub">Runs locally on your phone — add your name below while it finishes.</string>
+    <string name="onboarding_setup_sub">One-time setup · ~390 MB · Wi‑Fi recommended. Runs locally on your phone.</string>
+    <string name="onboarding_setup_retry">Retry download</string>
+    <string name="onboarding_setup_failed">Setup failed — check your connection and tap Retry</string>
     <string name="onboarding_name_title">What\'s your name?</string>
     <string name="onboarding_name_sub">We use your name locally to find your documents when you search \"my Aadhaar\", \"mera PAN\", and similar queries. Nothing leaves your phone.</string>
     <string name="onboarding_name_hint">Full name, e.g. Ram Kumar</string>

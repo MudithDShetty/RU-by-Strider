@@ -2,6 +2,7 @@ package com.strider.quanto
 
 import android.util.Log
 import com.strider.quanto.eval.EvalLogger
+import com.strider.quanto.eval.IndexPhaseTracker
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -180,6 +181,7 @@ class FileIndexer(
         rootPath: String,
         source: String = "manual",
         scanDocumentText: Boolean = true,
+        phaseTracker: IndexPhaseTracker? = null,
         onProgress: suspend (String) -> Unit,
         onFileIndexed: suspend (Int, Int, Int) -> Unit
     ): IndexDirectoryResult = withContext(Dispatchers.IO) {
@@ -190,6 +192,8 @@ class FileIndexer(
             onProgress("Cannot read $rootPath — check permissions")
             return@withContext IndexDirectoryResult(0, 0, 0, 0)
         }
+
+        phaseTracker?.begin("disk_scan")
 
         val storedMeta = db.getStoredFileMeta()
         Log.d(TAG, "Stored in DB: ${storedMeta.size} files")
@@ -238,6 +242,13 @@ class FileIndexer(
 
         Log.d(TAG, "To index: ${toIndex.size}, Skipped (unchanged): ${diskFiles.size - toIndex.size}")
 
+        phaseTracker?.end("disk_scan", fileCount = toIndex.size)
+
+        if (toIndex.size >= 50 && db.isEmbeddingCacheWarm()) {
+            Log.i(TAG, "Bulk index — releasing embedding RAM cache to reduce memory pressure")
+            db.invalidateEmbeddingCache()
+        }
+
         var indexedCount = 0
         val skippedCount = diskFiles.size - toIndex.size
 
@@ -245,7 +256,10 @@ class FileIndexer(
             try {
                 onProgress("Indexing batch of ${batch.size}… (${db.getTotalCount()} total so far)")
 
+                phaseTracker?.begin("metadata_extraction")
                 val metadatas = batch.map { buildFileMetadata(it) }
+                phaseTracker?.end("metadata_extraction", fileCount = metadatas.size)
+
                 val pairs = batch.zip(metadatas).filter { (_, meta) ->
                     meta.metadataString.isNotBlank().also { ok ->
                         if (!ok) Log.w(TAG, "Skipping blank metadata")
@@ -254,8 +268,11 @@ class FileIndexer(
                 if (pairs.isEmpty()) return@forEach
 
                 val texts = pairs.map { it.second.metadataString }
+                phaseTracker?.begin("embedding")
                 val embeddings = engine.embedBatch(texts)
+                phaseTracker?.end("embedding", fileCount = texts.size)
 
+                phaseTracker?.begin("persist")
                 pairs.forEachIndexed { i, (file, metadata) ->
                     val indexed = IndexedFile(
                         path         = file.absolutePath,
@@ -278,6 +295,7 @@ class FileIndexer(
                     onFileIndexed(indexedCount, skippedCount, deletedPaths.size)
                     Log.d(TAG, "Indexed [${metadata.categories.joinToString { it.label }}] ${file.name}")
                 }
+                phaseTracker?.end("persist", fileCount = pairs.size)
 
                 if (BATCH_COOLDOWN_MS > 0) delay(BATCH_COOLDOWN_MS)
             } catch (e: Exception) {
@@ -285,9 +303,13 @@ class FileIndexer(
                 for (file in batch) {
                     try {
                         onProgress("Indexing: ${file.name}")
+                        phaseTracker?.begin("metadata_extraction")
                         val metadata  = buildFileMetadata(file)
+                        phaseTracker?.end("metadata_extraction", fileCount = 1)
                         if (metadata.metadataString.isBlank()) continue
+                        phaseTracker?.begin("embedding")
                         val embedding = engine.embed(metadata.metadataString)
+                        phaseTracker?.end("embedding", fileCount = 1)
 
                         val indexed = IndexedFile(
                             path         = file.absolutePath,
@@ -301,11 +323,13 @@ class FileIndexer(
                         )
 
                         val ocrPending = scanDocumentText && metadata.pdfNeedsOcr
+                        phaseTracker?.begin("persist")
                         db.upsertFile(indexed, ocrPending)
                         val keywords = buildKeywordString(
                             file, metadata.contentSnippet, metadata, metadata.pdfMetadata
                         )
                         db.ftsInsert(file.absolutePath, keywords)
+                        phaseTracker?.end("persist", fileCount = 1)
                         indexedCount++
                         onFileIndexed(indexedCount, skippedCount, deletedPaths.size)
                     } catch (inner: Exception) {
@@ -315,12 +339,13 @@ class FileIndexer(
             }
         }
 
-        // FTS keywords are written per file during indexing — no full-library backfill here.
+        // Defer RAM warm — loading full matrix while ONNX is active causes OOM on large libraries.
         Log.d(TAG, "Index ready — ${db.getTotalCount()} files (disk-backed search)")
-        db.warmEmbeddingCache()
         val ocrPendingCount = if (scanDocumentText) db.getOcrPendingCount() else 0
         Log.d(TAG, "Done — indexed:$indexedCount skipped:$skippedCount deleted:${deletedPaths.size} total:$size ocrPending:$ocrPendingCount")
         if (EvalLogger.enabled) {
+            val phases = phaseTracker?.snapshot().orEmpty()
+            EvalLogger.logIndexPhases(phases, source)
             EvalLogger.logIndexCompleted(
                 source = source,
                 indexedCount = indexedCount,
@@ -328,7 +353,8 @@ class FileIndexer(
                 deletedCount = deletedPaths.size,
                 totalFiles = size,
                 durationMs = System.currentTimeMillis() - indexStartMs,
-                categoryCounts = getBucketSizes()
+                categoryCounts = getBucketSizes(),
+                phases = phases
             )
         }
         IndexDirectoryResult(

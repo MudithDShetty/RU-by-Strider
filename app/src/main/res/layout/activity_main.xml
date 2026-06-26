@@ -241,6 +241,19 @@
                         android:fontFamily="@font/hanken_grotesk_regular"
                         android:lineSpacingMultiplier="1.45"
                         android:gravity="center"/>
+
+                    <TextView
+                        android:id="@+id/btnOnboardingSetupRetry"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/onboarding_setup_retry"
+                        android:textSize="14sp"
+                        android:textColor="@color/ru_crimson"
+                        android:fontFamily="@font/hanken_grotesk_medium"
+                        android:padding="8dp"
+                        android:visibility="gone"/>
                 </LinearLayout>
 
                 <TextView

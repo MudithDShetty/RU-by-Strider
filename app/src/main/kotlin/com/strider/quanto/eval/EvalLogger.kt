@@ -76,6 +76,26 @@ object EvalLogger {
         dispatch("search", EvalEvent.toJsonLine("search_completed", props))
     }
 
+    fun logIndexPhase(record: IndexPhaseRecord, source: String = "manual") {
+        if (!enabled) return
+        val props = linkedMapOf<String, Any?>(
+            "phase" to record.phase,
+            "started_at" to record.startedAt,
+            "ended_at" to record.endedAt,
+            "duration_ms" to record.durationMs,
+            "file_count" to record.fileCount,
+            "source" to source
+        )
+        dispatch("index", EvalEvent.toJsonLine("index_phase", props))
+    }
+
+    fun logIndexPhases(phases: List<IndexPhaseRecord>, source: String = "manual") {
+        if (!enabled) return
+        for (record in phases) {
+            logIndexPhase(record, source)
+        }
+    }
+
     fun logIndexCompleted(
         source: String,
         indexedCount: Int,
@@ -83,10 +103,11 @@ object EvalLogger {
         deletedCount: Int,
         totalFiles: Int,
         durationMs: Long,
-        categoryCounts: Map<Category, Int>
+        categoryCounts: Map<Category, Int>,
+        phases: List<IndexPhaseRecord> = emptyList()
     ) {
         if (!enabled) return
-        val props = mapOf<String, Any?>(
+        val props = linkedMapOf<String, Any?>(
             "source" to source,
             "indexed_count" to indexedCount,
             "skipped_count" to skippedCount,
@@ -95,6 +116,9 @@ object EvalLogger {
             "duration_ms" to durationMs,
             "category_counts" to categoryCounts.mapKeys { it.key.name }
         )
+        if (phases.isNotEmpty()) {
+            props["phases"] = phases.map { it.toMap() }
+        }
         dispatch("index", EvalEvent.toJsonLine("index_completed", props))
     }
 

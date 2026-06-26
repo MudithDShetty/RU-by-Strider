@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.asset-pack'
+}
+
+assetPack {
+    packName = "embeddingmodel"
+    dynamicDelivery {
+        deliveryType = "fast-follow"
+    }
+}
+
+def modelSources = [
+    file("${rootProject.projectDir}/app/src/debug/assets/embedding_model.onnx"),
+    file("${rootProject.projectDir}/app/src/main/assets/embedding_model.onnx"),
+    file("${rootProject.projectDir}/model_assets/onnx/model.onnx"),
+]
+def modelSource = modelSources.find { it.exists() }
+def modelDestDir = file("src/main/assets")
+def modelDest = file("${modelDestDir}/embedding_model.onnx")
+
+tasks.register("syncModelAsset") {
+    doLast {
+        if (!modelSource.exists()) {
+            logger.warn("embedding_model.onnx not found at ${modelSource.path} — asset pack will be empty until model is copied")
+            return
+        }
+        modelDestDir.mkdirs()
+        if (!modelDest.exists() || modelDest.length() != modelSource.length()) {
+            project.copy {
+                from modelSource
+                into modelDestDir
+            }
+            logger.lifecycle("Synced embedding model to asset pack (${modelDest.length()} bytes)")
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name.startsWith("generate") || task.name.contains("AssetPack") || task.name == "preBuild") {
+        task.dependsOn("syncModelAsset")
+    }
+}

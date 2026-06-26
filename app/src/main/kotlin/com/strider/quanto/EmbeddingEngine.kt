@@ -54,31 +54,8 @@ class EmbeddingEngine(private val context: Context) {
         }
 
         val modelFile = File(context.filesDir, MODEL_ASSET)
-        val prefs = context.getSharedPreferences(StriderApp.PREFS_NAME, Context.MODE_PRIVATE)
         if (!modelFile.exists()) {
-            Log.d(TAG, "Copying model to files dir (first run only)...")
-            val totalBytes = context.assets.openFd(MODEL_ASSET).length
-            var copied = 0L
-            context.assets.open(MODEL_ASSET).use { input ->
-                modelFile.outputStream().use { output ->
-                    val buffer = ByteArray(256 * 1024)
-                    var read: Int
-                    while (input.read(buffer).also { read = it } != -1) {
-                        output.write(buffer, 0, read)
-                        copied += read
-                        if (totalBytes > 0) {
-                            val frac = 0.08f + 0.42f * (copied.toFloat() / totalBytes)
-                            onProgress?.invoke(
-                                frac,
-                                "Copying model… ${(copied * 100 / totalBytes).toInt()}%"
-                            )
-                        }
-                    }
-                }
-            }
-            prefs.edit().putBoolean(StriderApp.PREF_MODEL_COPIED, true).apply()
-        } else {
-            onProgress?.invoke(0.5f, "Loading AI model into memory…")
+            throw IllegalStateException("Model not delivered — call ModelAssetDelivery.ensureModelReady() first")
         }
 
         modelPath = modelFile.absolutePath

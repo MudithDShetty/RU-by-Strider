@@ -10,6 +10,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.strider.quanto.eval.EvalLogger
 import kotlinx.coroutines.CoroutineScope
@@ -39,10 +40,22 @@ class StriderApp : Application() {
     val isCoreInitialized: Boolean
         get() = ::db.isInitialized && ::engine.isInitialized && ::indexer.isInitialized
 
-    /** True only on the very first install before the model file has been copied. */
+    /** True while the embedding model is being downloaded or loaded for the first time. */
     val isFirstModelLoad: Boolean
         get() = !getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            .getBoolean(PREF_MODEL_COPIED, false)
+            .getBoolean(PREF_MODEL_COPIED, false) || !isEngineReady
+
+    val isModelSetupInProgress: Boolean
+        get() {
+            if (isEngineReady) return false
+            val phase = currentInitState.phase
+            return phase == InitPhase.MODEL_DOWNLOAD ||
+                phase == InitPhase.MODEL_COPY ||
+                phase == InitPhase.MODEL_LOAD ||
+                (phase != InitPhase.READY && isFirstModelLoad)
+        }
+
+    private var modelDelivery: ModelAssetDelivery? = null
 
     private val initStarted = AtomicBoolean(false)
     private val readyListeners = mutableListOf<(StriderApp) -> Unit>()
@@ -117,9 +130,20 @@ class StriderApp : Application() {
             message = message,
             progress = progress,
             durationMs = durationMs,
-            isFirstModelLoad = isFirstModelLoad,
+            isFirstModelLoad = !getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getBoolean(PREF_MODEL_COPIED, false),
             indexFileCount = if (::indexer.isInitialized) indexer.size else 0
         )
+    }
+
+    fun requestCellularDownloadConfirmation(activity: android.app.Activity) {
+        modelDelivery?.showCellularConfirmation(activity)
+    }
+
+    fun retryModelDelivery() {
+        initStarted.set(false)
+        engineReadyFlag.set(false)
+        startEngineInit()
     }
 
     private fun startEngineInit() {
@@ -127,50 +151,63 @@ class StriderApp : Application() {
 
         applicationScope.launch(Dispatchers.IO) {
             try {
-                reportProgress(InitPhase.DB, "Starting…", 2)
-
-                db = DatabaseHelper(this@StriderApp)
-                engine = EmbeddingEngine(this@StriderApp)
-                indexer = FileIndexer(engine, db)
+                if (!::db.isInitialized) {
+                    reportProgress(InitPhase.DB, "Starting…", 2)
+                    db = DatabaseHelper(this@StriderApp)
+                    engine = EmbeddingEngine(this@StriderApp)
+                    indexer = FileIndexer(engine, db)
+                }
 
                 // Load file index in parallel — does not need the ONNX session
-                val indexJob = launch {
-                    val count = db.getTotalCount()
-                    if (count > 0) {
-                        reportProgress(InitPhase.INDEX_LOAD, "Loading $count indexed files…", 88)
-                        indexer.loadFromDatabase(deferFtsBackfill = true)
-                    }
-                    indexReadyFlag.set(true)
-                    Log.d(TAG, "Index ready — ${indexer.size} files")
-
-                    synchronized(indexReadyListeners) {
-                        val listeners = indexReadyListeners.toList()
-                        indexReadyListeners.clear()
-                        launch(Dispatchers.Main) { listeners.forEach { it(this@StriderApp) } }
-                    }
-
-                    if (count > 0) {
-                        launch { indexer.runDeferredFtsBackfill() }
-                        launch {
-                            db.warmEmbeddingCache()
-                            Log.i(TAG, "Embedding RAM cache ready: ${db.isEmbeddingCacheWarm()} (${indexer.size} files)")
+                val indexJob = if (!indexReadyFlag.get()) {
+                    launch {
+                        val count = db.getTotalCount()
+                        if (count > 0) {
+                            reportProgress(InitPhase.INDEX_LOAD, "Loading $count indexed files…", 88)
+                            indexer.loadFromDatabase(deferFtsBackfill = true)
                         }
-                        val scanDocumentText = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                            .getBoolean(PREF_SCAN_DOCUMENT_TEXT, true)
-                        if (scanDocumentText && db.getOcrPendingCount() > 0) {
+                        indexReadyFlag.set(true)
+                        Log.d(TAG, "Index ready — ${indexer.size} files")
+
+                        synchronized(indexReadyListeners) {
+                            val listeners = indexReadyListeners.toList()
+                            indexReadyListeners.clear()
+                            launch(Dispatchers.Main) { listeners.forEach { it(this@StriderApp) } }
+                        }
+
+                        if (count > 0) {
+                            launch { indexer.runDeferredFtsBackfill() }
                             launch {
-                                // Defer OCR so startup (model load + embed warm) finishes first.
-                                delay(OCR_STARTUP_DEFER_MS)
-                                if (db.getOcrPendingCount() > 0) enqueueOcrIndexing()
+                                if (isMainIndexingActive()) {
+                                    Log.i(TAG, "Skipping startup embedding warm — indexing already running")
+                                } else {
+                                    db.warmEmbeddingCache()
+                                    Log.i(TAG, "Embedding RAM cache ready: ${db.isEmbeddingCacheWarm()} (${indexer.size} files)")
+                                }
+                            }
+                            val scanDocumentText = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                                .getBoolean(PREF_SCAN_DOCUMENT_TEXT, true)
+                            if (scanDocumentText && db.getOcrPendingCount() > 0) {
+                                launch {
+                                    delay(OCR_STARTUP_DEFER_MS)
+                                    if (db.getOcrPendingCount() > 0) enqueueOcrIndexing()
+                                }
                             }
                         }
                     }
+                } else {
+                    null
+                }
+
+                val delivery = ModelAssetDelivery(this@StriderApp).also { modelDelivery = it }
+                delivery.ensureModelReady { fraction, message ->
+                    val pct = (3 + fraction * 47).toInt().coerceIn(3, 50)
+                    reportProgress(InitPhase.MODEL_DOWNLOAD, message, pct)
                 }
 
                 engine.initialize { fraction, message ->
-                    val pct = (5 + fraction * 75).toInt().coerceIn(5, 80)
-                    val phase = if (fraction < 0.5f) InitPhase.MODEL_COPY else InitPhase.MODEL_LOAD
-                    reportProgress(phase, message, pct)
+                    val pct = (50 + fraction * 30).toInt().coerceIn(50, 80)
+                    reportProgress(InitPhase.MODEL_LOAD, message, pct)
                 }
 
                 engine.embed("warmup", countTowardRefresh = false)
@@ -188,15 +225,24 @@ class StriderApp : Application() {
                     launch(Dispatchers.Main) { listeners.forEach { it(this@StriderApp) } }
                 }
 
-                indexJob.join()
+                indexJob?.join()
                 reportProgress(InitPhase.READY, "Ready", 100)
 
                 synchronized(progressListeners) { progressListeners.clear() }
+            } catch (e: ModelDeliveryException) {
+                Log.e(TAG, "Model delivery failed", e)
+                initStarted.set(false)
+                synchronized(progressListeners) { /* keep listeners for retry UI */ }
+                reportProgress(
+                    InitPhase.MODEL_DOWNLOAD,
+                    e.message ?: "Model download failed — tap Retry",
+                    -1
+                )
             } catch (e: Exception) {
                 Log.e(TAG, "Engine init failed", e)
                 initStarted.set(false)
-                synchronized(progressListeners) { progressListeners.clear() }
-                reportProgress(InitPhase.MODEL_LOAD, "Setup failed — restart app", -1)
+                synchronized(progressListeners) { /* keep listeners for retry UI */ }
+                reportProgress(InitPhase.MODEL_LOAD, "Setup failed — tap Retry", -1)
             }
         }
     }
@@ -239,6 +285,32 @@ class StriderApp : Application() {
         )
     }
 
+    /** Warm embedding RAM after index when the device is idle — keeps search fast without OOM peak. */
+    fun scheduleDeferredEmbeddingWarmIfNeeded() {
+        if (!::db.isInitialized) return
+        if (db.isEmbeddingCacheWarm()) return
+        if (db.getTotalCount() == 0) return
+
+        applicationScope.launch(Dispatchers.IO) {
+            delay(DEFERRED_WARM_DELAY_MS)
+            if (db.isEmbeddingCacheWarm() || isMainIndexingActive()) return@launch
+            Log.i(TAG, "Deferred embedding cache warm (${db.getTotalCount()} files)…")
+            db.warmEmbeddingCache()
+            Log.i(TAG, "Deferred warm finished: cache=${db.isEmbeddingCacheWarm()}")
+        }
+    }
+
+    private fun isMainIndexingActive(): Boolean {
+        val infos = WorkManager.getInstance(this)
+            .getWorkInfosForUniqueWork(IndexingWorker.UNIQUE_WORK_NAME)
+            .get()
+        return infos.any {
+            it.state == WorkInfo.State.RUNNING ||
+                it.state == WorkInfo.State.ENQUEUED ||
+                it.state == WorkInfo.State.BLOCKED
+        }
+    }
+
     fun schedulePeriodicIndexing(enabled: Boolean) {
         val wm = WorkManager.getInstance(this)
         if (!enabled) {
@@ -278,12 +350,16 @@ class StriderApp : Application() {
         private const val TAG = "StriderApp"
         const val PREFS_NAME = "strider_quanto_prefs"
         const val PREF_MODEL_COPIED = "model_copied"
+        const val PREF_MODEL_VERSION = "model_version"
         const val PREF_SETUP_COMPLETE = "setup_complete"
         const val PREF_SCAN_DOCUMENT_TEXT = "scan_document_text_enabled"
         const val NOTIFICATION_CHANNEL_ID = "indexing_channel"
 
         /** Wait after cold start before background OCR (reduces heat with model init). */
         private const val OCR_STARTUP_DEFER_MS = 90_000L
+
+        /** Wait after index completes before loading full embedding matrix into RAM. */
+        private const val DEFERRED_WARM_DELAY_MS = 45_000L
 
         lateinit var instance: StriderApp
             private set

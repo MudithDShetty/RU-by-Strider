@@ -128,13 +128,13 @@ class MainActivity : AppCompatActivity() {
         inflateScreens()
         applyShellWordmarks()
         setupNavBar()
-        val restored = restoreLastScreen()
-        showScreen(restored)
         setupHomeScreen()
         setupIndexScreen()
         setupAnalyticsScreen()
         setupSettingsScreen()
         setupOnboardingOverlay()
+        val restored = restoreLastScreen()
+        showScreen(restored)
         attachToApp()
         observeIndexingWork()
         syncHomeDecorAnimations()
@@ -605,6 +605,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderAnalyticsDashboard(state: EvalLiveFeed.DashboardState) {
+        if (!::analyticsAdapter.isInitialized) return
         analyticsBinding.tvSystemStatus.text = buildSystemStatusText(state)
         analyticsBinding.tvLastSearch.text = state.lastSearchSummary
             ?: getString(R.string.analytics_no_search_yet)
@@ -619,6 +620,7 @@ class MainActivity : AppCompatActivity() {
         appendLine("init_phase: ${app.currentInitStateOrReady().phase.name}")
         state.lastInitPhase?.let { appendLine("last_init: $it") }
         state.lastIndexSummary?.let { appendLine("last_index: $it") }
+        state.lastIndexPhases?.let { appendLine("index_phases:\n$it") }
         state.lastGoldenStatus?.let { appendLine("golden_eval: $it") }
         appendLine("events_logged: ${state.totalEventCount}")
     }
@@ -821,16 +823,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun syncOnboardingSetupUi(state: AppInitState) {
         if (!::binding.isInitialized) return
-        val showSetup = app.isFirstModelLoad &&
+        val showSetup = app.isModelSetupInProgress &&
             !state.isComplete &&
-            binding.onboardingOverlay.visibility == View.VISIBLE
+            (binding.onboardingOverlay.visibility == View.VISIBLE || state.progress == -1)
         binding.llOnboardingSetup.visibility = if (showSetup) View.VISIBLE else View.GONE
-        if (!showSetup) return
-        binding.tvOnboardingSetupMessage.text =
-            state.message.ifBlank { getString(R.string.status_first_load) }
+        if (!showSetup) {
+            binding.btnOnboardingSetupRetry.visibility = View.GONE
+            return
+        }
+        binding.tvOnboardingSetupMessage.text = when {
+            state.progress == -1 -> state.message.ifBlank { getString(R.string.onboarding_setup_failed) }
+            else -> state.message.ifBlank { getString(R.string.status_first_load) }
+        }
         if (state.progress >= 0) {
             binding.onboardingSetupProgressBar.progress = state.progress
+            binding.onboardingSetupProgressBar.visibility = View.VISIBLE
+        } else {
+            binding.onboardingSetupProgressBar.visibility = View.INVISIBLE
         }
+        binding.btnOnboardingSetupRetry.visibility =
+            if (state.progress == -1) View.VISIBLE else View.GONE
     }
 
     private fun onEngineReady(readyApp: StriderApp) {
@@ -875,6 +887,7 @@ class MainActivity : AppCompatActivity() {
                 if (count > 0) getString(R.string.settings_status_ready_indexed, count)
                 else getString(R.string.settings_status_ready)
             }
+            initState.progress == -1 -> initState.message.ifBlank { getString(R.string.onboarding_setup_failed) }
             initState.progress >= 0 ->
                 getString(R.string.settings_status_loading, initState.message, initState.progress)
             else -> initState.message.ifBlank { getString(R.string.status_loading) }
@@ -896,6 +909,11 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnOnboardingSkip.setOnClickListener {
             hideOnboardingOverlay()
+        }
+
+        binding.btnOnboardingSetupRetry.setOnClickListener {
+            app.requestCellularDownloadConfirmation(this)
+            app.retryModelDelivery()
         }
     }
 
@@ -955,6 +973,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateIndexingUi(info: WorkInfo) {
+        if (isFinishing || isDestroyed) return
+        if (!::indexBinding.isInitialized || !::indexer.isInitialized) return
+
         val status = info.progress.getString(IndexingWorker.KEY_STATUS)
         val count = info.progress.getInt(IndexingWorker.KEY_COUNT, 0)
         val total = info.progress.getInt(IndexingWorker.KEY_TOTAL, 0)

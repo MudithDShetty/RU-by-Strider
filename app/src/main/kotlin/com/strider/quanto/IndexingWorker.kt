@@ -14,6 +14,7 @@ import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.strider.quanto.eval.EvalLogger
+import com.strider.quanto.eval.IndexPhaseTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -23,13 +24,18 @@ class IndexingWorker(
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
+    private var lastForegroundAtMs = 0L
+    private var lastProgressAtMs = 0L
+
     override suspend fun doWork(): ListenableWorker.Result = withContext(Dispatchers.IO) {
         val app = applicationContext as StriderApp
         val source = inputData.getString(KEY_SOURCE) ?: "workmanager"
+        val phaseTracker = if (EvalLogger.enabled) IndexPhaseTracker() else null
         if (EvalLogger.enabled) EvalLogger.logIndexWorker("started")
 
         // Model load can take several minutes on first install or after Android kills the process.
         if (!app.isEngineReady || !app.isCoreInitialized) {
+            phaseTracker?.begin(PHASE_WAITING_MODEL)
             var waitedMs = 0L
             while ((!app.isEngineReady || !app.isCoreInitialized) && waitedMs < MAX_MODEL_WAIT_MS) {
                 val secs = waitedMs / 1000
@@ -54,6 +60,7 @@ class IndexingWorker(
                 )
                 return@withContext ListenableWorker.Result.retry()
             }
+            phaseTracker?.end(PHASE_WAITING_MODEL)
         }
 
         val rootPath = Environment.getExternalStorageDirectory().absolutePath
@@ -64,7 +71,7 @@ class IndexingWorker(
                 KEY_COUNT to 0
             )
         )
-        setForeground(buildForegroundInfo(0, "Starting indexer…"))
+        setForegroundSafe(buildForegroundInfo(0, "Starting indexer…"))
 
         try {
             val scanDocumentText = applicationContext.getSharedPreferences(
@@ -76,32 +83,30 @@ class IndexingWorker(
                 rootPath = rootPath,
                 source = source,
                 scanDocumentText = scanDocumentText,
+                phaseTracker = phaseTracker,
                 onProgress = { msg ->
-                    setProgress(
-                        workDataOf(
-                            KEY_STATUS to msg,
-                            KEY_PHASE to phaseForMessage(msg),
-                            KEY_COUNT to app.indexer.size
-                        )
+                    reportProgress(
+                        count = app.indexer.size,
+                        status = msg,
+                        phase = phaseForMessage(msg),
+                        force = true
                     )
-                    setForeground(buildForegroundInfo(app.indexer.size, msg))
                 },
                 onFileIndexed = { indexed, _, _ ->
-                    setProgress(
-                        workDataOf(
-                            KEY_STATUS to "Indexing files…",
-                            KEY_PHASE to PHASE_INDEXING,
-                            KEY_COUNT to indexed,
-                            KEY_TOTAL to app.indexer.size + indexed
-                        )
+                    reportProgress(
+                        count = indexed,
+                        status = "Indexing files…",
+                        phase = PHASE_INDEXING,
+                        total = app.indexer.size
                     )
-                    setForeground(buildForegroundInfo(indexed, "Indexing: $indexed files"))
                 }
             )
 
             if (result.ocrPendingCount > 0 && scanDocumentText) {
                 app.enqueueOcrIndexing()
             }
+
+            app.scheduleDeferredEmbeddingWarmIfNeeded()
 
             if (EvalLogger.enabled) {
                 EvalLogger.logIndexWorker("success", totalFiles = app.indexer.size)
@@ -135,6 +140,48 @@ class IndexingWorker(
             ListenableWorker.Result.failure(
                 workDataOf(KEY_STATUS to (e.message ?: "Unknown error"))
             )
+        }
+    }
+
+    private suspend fun reportProgress(
+        count: Int,
+        status: String,
+        phase: String,
+        total: Int = 0,
+        force: Boolean = false
+    ) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastProgressAtMs < PROGRESS_THROTTLE_MS) return
+        lastProgressAtMs = now
+
+        setProgressQuiet(
+            workDataOf(
+                KEY_STATUS to status,
+                KEY_PHASE to phase,
+                KEY_COUNT to count,
+                KEY_TOTAL to total
+            )
+        )
+
+        if (now - lastForegroundAtMs >= FOREGROUND_THROTTLE_MS) {
+            lastForegroundAtMs = now
+            setForegroundSafe(buildForegroundInfo(count, status))
+        }
+    }
+
+    private suspend fun setProgressQuiet(data: Data) {
+        try {
+            setProgress(data)
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "setProgress failed: ${e.message}")
+        }
+    }
+
+    private suspend fun setForegroundSafe(info: ForegroundInfo) {
+        try {
+            setForeground(info)
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "setForeground failed: ${e.message}")
         }
     }
 
@@ -202,6 +249,9 @@ class IndexingWorker(
         private const val MAX_MODEL_WAIT_MS = 15 * 60 * 1000L
         private const val WAIT_POLL_MS = 1000L
         private const val NOTIFICATION_ID = 1001
+        private const val FOREGROUND_THROTTLE_MS = 5_000L
+        private const val PROGRESS_THROTTLE_MS = 5_000L
+        private const val TAG = "IndexingWorker"
 
         fun inputData(forceFull: Boolean, source: String = "workmanager"): Data =
             workDataOf(KEY_FORCE_FULL to forceFull, KEY_SOURCE to source)

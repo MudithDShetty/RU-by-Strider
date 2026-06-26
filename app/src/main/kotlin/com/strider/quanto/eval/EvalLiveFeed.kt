@@ -27,6 +27,7 @@ object EvalLiveFeed {
         val lastGoldenStatus: String? = null,
         val lastInitPhase: String? = null,
         val lastIndexSummary: String? = null,
+        val lastIndexPhases: String? = null,
         val totalEventCount: Int = 0
     )
 
@@ -40,6 +41,7 @@ object EvalLiveFeed {
     @Volatile private var lastGoldenStatus: String? = null
     @Volatile private var lastInitPhase: String? = null
     @Volatile private var lastIndexSummary: String? = null
+    @Volatile private var lastIndexPhases: String? = null
     @Volatile private var historyLoaded = false
 
     fun addListener(listener: (DashboardState) -> Unit) {
@@ -57,8 +59,8 @@ object EvalLiveFeed {
         val eventType = parsed.get("event")?.asString ?: "unknown"
         val ts = parsed.get("ts")?.asString ?: ""
         val id = "${ts}_${eventType}_${events.size}"
-        val summary = formatSummary(eventType, parsed)
-        val detail = formatDetail(eventType, parsed)
+        val summary = runCatching { formatSummary(eventType, parsed) }.getOrDefault(eventType)
+        val detail = runCatching { formatDetail(eventType, parsed) }.getOrDefault("")
 
         updateHighlights(eventType, parsed, summary)
 
@@ -85,8 +87,13 @@ object EvalLiveFeed {
                     val ts = parsed.get("ts")?.asString ?: ""
                     val id = "${ts}_${eventType}_disk"
                     if (id in existingIds) continue
-                    val summary = formatSummary(eventType, parsed)
-                    events.addLast(LiveEvent(id, ts, categoryFor(eventType), eventType, summary, formatDetail(eventType, parsed)))
+                    val summary = runCatching { formatSummary(eventType, parsed) }.getOrDefault(eventType)
+                    events.addLast(
+                        LiveEvent(
+                            id, ts, categoryFor(eventType), eventType, summary,
+                            runCatching { formatDetail(eventType, parsed) }.getOrDefault("")
+                        )
+                    )
                     updateHighlights(eventType, parsed, summary)
                 }
                 while (events.size > MAX_EVENTS) events.removeLast()
@@ -102,6 +109,7 @@ object EvalLiveFeed {
             lastGoldenStatus = lastGoldenStatus,
             lastInitPhase = lastInitPhase,
             lastIndexSummary = lastIndexSummary,
+            lastIndexPhases = lastIndexPhases,
             totalEventCount = events.size
         )
     }
@@ -126,13 +134,18 @@ object EvalLiveFeed {
                 val ms = obj.get("duration_ms")?.asLong ?: 0L
                 lastInitPhase = "$phase · ${ms}ms"
             }
-            "index_completed" -> lastIndexSummary = summary
+            "index_completed" -> {
+                lastIndexSummary = summary
+                obj.getAsJsonArray("phases")?.let { phases ->
+                    lastIndexPhases = formatIndexPhasesCompact(phases)
+                }
+            }
         }
     }
 
     private fun categoryFor(eventType: String): String = when (eventType) {
         "search_completed", "result_clicked" -> "search"
-        "index_completed", "index_worker" -> "index"
+        "index_completed", "index_worker", "index_phase" -> "index"
         "init_phase" -> "init"
         else -> "other"
     }
@@ -174,7 +187,16 @@ object EvalLiveFeed {
             val phase = obj.get("phase")?.asString ?: "?"
             val ms = obj.get("duration_ms")?.asLong ?: 0L
             val count = obj.get("index_file_count")?.asInt ?: 0
-            "Init $phase · ${ms}ms${if (count > 0) " · $count files" else ""}"
+            "Init $phase · ${formatDuration(ms)}${if (count > 0) " · $count files" else ""}"
+        }
+        "index_phase" -> {
+            val phase = obj.get("phase")?.asString ?: "?"
+            val ms = obj.get("duration_ms")?.asLong ?: 0L
+            val count = obj.get("file_count")?.asInt ?: 0
+            buildString {
+                append("Index $phase · ${formatDuration(ms)}")
+                if (count > 0) append(" · $count files")
+            }
         }
         else -> eventType
     }
@@ -197,8 +219,20 @@ object EvalLiveFeed {
             buildString {
                 appendLine("source: ${obj.get("source")?.asString}")
                 cats?.entrySet()?.forEach { appendLine("${it.key}: ${it.value}") }
+                obj.getAsJsonArray("phases")?.let { phases ->
+                    appendLine()
+                    append(formatIndexPhasesDetail(phases))
+                }
             }.trim()
         }
+        "index_phase" -> buildString {
+            appendLine("started: ${obj.get("started_at")?.asString ?: "?"}")
+            appendLine("ended:   ${obj.get("ended_at")?.asString ?: "?"}")
+            appendLine("duration: ${obj.get("duration_ms")?.asLong ?: 0L}ms")
+            val count = obj.get("file_count")?.asInt ?: 0
+            if (count > 0) appendLine("files: $count")
+            obj.get("source")?.asString?.let { appendLine("source: $it") }
+        }.trim()
         else -> gson.toJson(obj)
             .replace(",", ",\n")
             .take(600)
@@ -209,6 +243,33 @@ object EvalLiveFeed {
         ms < 60_000 -> "${ms / 1000}s"
         else -> "${ms / 60_000}m ${(ms % 60_000) / 1000}s"
     }
+
+    private fun formatIsoClock(iso: String): String =
+        iso.takeLast(12).removePrefix("T").removeSuffix("Z")
+
+    private fun formatIndexPhasesCompact(phases: com.google.gson.JsonArray): String = buildString {
+        phases.forEach { el ->
+            val o = el.asJsonObject
+            val phase = o.get("phase")?.asString ?: return@forEach
+            val started = o.get("started_at")?.asString?.let { formatIsoClock(it) } ?: "?"
+            val ended = o.get("ended_at")?.asString?.let { formatIsoClock(it) } ?: "?"
+            val ms = o.get("duration_ms")?.asLong ?: 0L
+            appendLine("$phase: $started→$ended (${formatDuration(ms)})")
+        }
+    }.trim()
+
+    private fun formatIndexPhasesDetail(phases: com.google.gson.JsonArray): String = buildString {
+        phases.forEach { el ->
+            val o = el.asJsonObject
+            val phase = o.get("phase")?.asString ?: return@forEach
+            appendLine("$phase:")
+            appendLine("  started: ${o.get("started_at")?.asString ?: "?"}")
+            appendLine("  ended:   ${o.get("ended_at")?.asString ?: "?"}")
+            appendLine("  duration: ${o.get("duration_ms")?.asLong ?: 0L}ms")
+            val count = o.get("file_count")?.asInt ?: 0
+            if (count > 0) appendLine("  files: $count")
+        }
+    }.trim()
 
     private fun readRecentFromDisk(context: Context, maxLines: Int): List<String> {
         val eventsDir = File(context.filesDir, "ru_eval/events")

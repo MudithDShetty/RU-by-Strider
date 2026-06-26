@@ -3,9 +3,20 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def embeddingModelCandidates = [
+    file("${rootProject.projectDir}/embeddingmodel/src/main/assets/embedding_model.onnx"),
+    file("${rootProject.projectDir}/app/src/debug/assets/embedding_model.onnx"),
+    file("${rootProject.projectDir}/app/src/main/assets/embedding_model.onnx"),
+    file("${rootProject.projectDir}/model_assets/onnx/model.onnx"),
+]
+def embeddingModelFile = embeddingModelCandidates.find { it.exists() }
+def embeddingModelBytes = embeddingModelFile != null ? embeddingModelFile.length() : 0L
+
 android {
     namespace 'com.strider.quanto'
     compileSdk 34
+
+    assetPacks = [":embeddingmodel"]
 
     defaultConfig {
         applicationId "com.strider.quanto"
@@ -14,6 +25,8 @@ android {
         versionCode 1
         versionName "1.0"
         buildConfigField "boolean", "EVAL_LOGGING", "true"
+        buildConfigField "long", "MODEL_BYTES", "${embeddingModelBytes}L"
+        buildConfigField "int", "MODEL_VERSION", "1"
     }
 
     buildTypes {
@@ -21,6 +34,12 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             buildConfigField "boolean", "EVAL_LOGGING", "false"
+        }
+    }
+
+    sourceSets {
+        debug {
+            assets.srcDirs += ['src/debug/assets']
         }
     }
 
@@ -45,7 +64,21 @@ android {
     }
 }
 
+android.applicationVariants.configureEach { variant ->
+    if (variant.buildType.name == "release") {
+        variant.mergeAssetsProvider.configure { mergeTask ->
+            mergeTask.doLast {
+                delete(fileTree(mergeTask.outputDir.get()).matching { include "**/embedding_model.onnx" })
+            }
+        }
+    }
+}
+
 dependencies {
+    // Play Asset Delivery — fast-follow embedding model pack
+    implementation 'com.google.android.play:asset-delivery:2.2.2'
+    implementation 'com.google.android.play:asset-delivery-ktx:2.2.2'
+
     // ONNX Runtime — runs the embedding model locally
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.17.3'
 
@@ -87,4 +120,35 @@ dependencies {
     implementation 'net.jthink:jaudiotagger:3.0.1'
 
     testImplementation 'junit:junit:4.13.2'
+}
+
+def debugModelSources = [
+    file("${rootProject.projectDir}/model_assets/onnx/model.onnx"),
+    file("${rootProject.projectDir}/embeddingmodel/src/main/assets/embedding_model.onnx"),
+]
+def debugModelSource = debugModelSources.find { it.exists() }
+
+tasks.register("syncDebugModelAsset") {
+    doLast {
+        if (debugModelSource == null) {
+            logger.warn("No embedding model found for debug — copy model.onnx to app/src/debug/assets/embedding_model.onnx")
+            return
+        }
+        def destDir = file("src/debug/assets")
+        destDir.mkdirs()
+        def dest = file("${destDir}/embedding_model.onnx")
+        if (!dest.exists() || dest.length() != debugModelSource.length()) {
+            copy {
+                from debugModelSource
+                into destDir
+                rename { "embedding_model.onnx" }
+            }
+        }
+    }
+}
+
+afterEvaluate {
+    tasks.matching { it.name == "preDebugBuild" }.configureEach {
+        dependsOn("syncDebugModelAsset")
+    }
 }

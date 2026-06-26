@@ -80,7 +80,11 @@ internal class EvalFileSink(
     },
     "index_completed": {
       "file": "events/index_YYYY-MM-DD.jsonl",
-      "fields": ["source", "indexed_count", "skipped_count", "deleted_count", "total_files", "duration_ms", "category_counts"]
+      "fields": ["source", "indexed_count", "skipped_count", "deleted_count", "total_files", "duration_ms", "category_counts", "phases"]
+    },
+    "index_phase": {
+      "file": "events/index_YYYY-MM-DD.jsonl",
+      "fields": ["phase", "started_at", "ended_at", "duration_ms", "file_count", "source"]
     },
     "index_worker": {
       "file": "events/index_YYYY-MM-DD.jsonl",

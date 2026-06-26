@@ -2,6 +2,7 @@ package com.strider.quanto
 
 enum class InitPhase {
     DB,
+    MODEL_DOWNLOAD,
     MODEL_COPY,
     MODEL_LOAD,
     INDEX_LOAD,
