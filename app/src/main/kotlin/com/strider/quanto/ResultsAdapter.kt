@@ -7,7 +7,9 @@ import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.view.Gravity
+import android.provider.Settings
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -19,7 +21,8 @@ import com.strider.quanto.databinding.ItemResultBinding
 import java.io.File
 
 class ResultsAdapter(
-    private val onItemClick: (SearchResult) -> Unit
+    private val onItemClick: (SearchResult) -> Unit,
+    private val onMoreClick: (SearchResult, View) -> Unit,
 ) : ListAdapter<SearchResult, ResultsAdapter.ViewHolder>(DIFF_CALLBACK) {
 
     private var shareMode = false
@@ -65,6 +68,7 @@ class ResultsAdapter(
         private val sourceDotDrawable = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
         }
+        private val rowBackground = ResultRowBackground(binding.root.context)
 
         init {
             binding.vSourceDot.background = sourceDotDrawable
@@ -73,6 +77,17 @@ class ResultsAdapter(
 
         fun bindSourceDot(color: Int) {
             sourceDotDrawable.setColor(color)
+        }
+
+        fun bindRowBackground(extUpper: String, selected: Boolean) {
+            if (selected) {
+                binding.root.setBackgroundResource(R.drawable.bg_file_card_selected)
+                binding.root.clipToOutline = true
+                binding.root.outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+            } else {
+                rowBackground.setAccentColor(RuUi.extAccentColor(binding.root.context, extUpper))
+                rowBackground.applyTo(binding.root)
+            }
         }
     }
 
@@ -109,19 +124,88 @@ class ResultsAdapter(
             holder.bindSourceDot(RuUi.sourceDotColor(ctx, source))
             bindThumb(this, extUpper, file)
 
-            root.setBackgroundResource(
-                when {
-                    shareMode && file.path == selectedPath -> R.drawable.bg_file_card_selected
-                    else -> R.drawable.bg_result_row_top
-                }
+            holder.bindRowBackground(
+                extUpper = extUpper,
+                selected = shareMode && file.path == selectedPath,
             )
-            root.setOnClickListener { onItemClick(result) }
+            RuUi.applyResultRowRipple(root, extUpper)
+            llRowContent.setPadding(
+                llRowContent.paddingLeft,
+                llRowContent.paddingTop,
+                if (shareMode) 0 else llRowContent.resources.getDimensionPixelSize(R.dimen.result_more_hit_size),
+                llRowContent.paddingBottom,
+            )
+            llRowContent.contentDescription = ctx.getString(
+                R.string.a11y_result_row,
+                file.name,
+                source
+            )
+            flMore.contentDescription = ctx.getString(R.string.file_action_more, file.name)
+            flMore.visibility = if (shareMode) View.GONE else View.VISIBLE
+            root.scaleX = 1f
+            root.scaleY = 1f
+            flMore.scaleX = 1f
+            flMore.scaleY = 1f
+            attachPressAnimation(root, llRowContent, rippleHost = root, pressScale = 0.985f)
+            attachPressAnimation(flMore, flMore, pressScale = 0.92f)
+            llRowContent.setOnClickListener {
+                RuUi.performTapHaptic(it)
+                onItemClick(result)
+            }
+            flMore.setOnClickListener { anchor ->
+                RuUi.performTapHaptic(anchor)
+                onMoreClick(result, anchor)
+            }
+        }
+    }
+
+    private fun attachPressAnimation(
+        animated: View,
+        touchTarget: View,
+        rippleHost: View? = null,
+        pressScale: Float = 0.985f,
+    ) {
+        val scale = Settings.Global.getFloat(
+            touchTarget.context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f
+        )
+        if (scale <= 0f) {
+            touchTarget.setOnTouchListener(null)
+            return
+        }
+        touchTarget.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    rippleHost?.isPressed = true
+                    animated.animate().cancel()
+                    animated.animate()
+                        .scaleX(pressScale)
+                        .scaleY(pressScale)
+                        .setDuration(90L)
+                        .start()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    rippleHost?.isPressed = false
+                    animated.animate().cancel()
+                    animated.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
+                }
+            }
+            false
         }
     }
 
     override fun onViewRecycled(holder: ViewHolder) {
         super.onViewRecycled(holder)
         with(holder.binding) {
+            llRowContent.setOnTouchListener(null)
+            flMore.setOnTouchListener(null)
+            root.isPressed = false
+            root.foreground = null
+            root.scaleX = 1f
+            root.scaleY = 1f
+            flMore.scaleX = 1f
+            flMore.scaleY = 1f
             FilePreviewLoader.clearPreview(ivPreview, tvExtensionFallback)
         }
     }
@@ -146,27 +230,18 @@ class ResultsAdapter(
                 lastModified = file.lastModified,
             )
         } else {
-            showCenteredFallback(binding, extUpper, isImage)
+            showCenteredFallback(binding, extUpper)
         }
     }
 
-    private fun showCenteredFallback(binding: ItemResultBinding, extUpper: String, isImage: Boolean) {
+    private fun showCenteredFallback(binding: ItemResultBinding, extUpper: String) {
         binding.ivPreview.setImageDrawable(null)
         binding.tvExtensionFallback.apply {
             text = extUpper
             textSize = 10f
             setBackgroundResource(0)
             setPadding(0, 0, 0, 0)
-            setTextColor(
-                ContextCompat.getColor(
-                    context,
-                    when {
-                        isImage -> R.color.text_secondary
-                        extUpper in OFFICE_EXTS -> R.color.ru_amber
-                        else -> R.color.ru_crimson
-                    }
-                )
-            )
+            setTextColor(RuUi.extAccentColor(context, extUpper))
             layoutParams = (layoutParams as FrameLayout.LayoutParams).apply {
                 gravity = Gravity.CENTER
                 setMargins(0, 0, 0, 0)
@@ -195,7 +270,6 @@ class ResultsAdapter(
 
     companion object {
         private val IMAGE_EXTS = setOf("JPG", "JPEG", "PNG", "GIF", "WEBP", "HEIC")
-        private val OFFICE_EXTS = setOf("DOC", "DOCX", "PPT", "PPTX")
 
         private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<SearchResult>() {
             override fun areItemsTheSame(a: SearchResult, b: SearchResult) =

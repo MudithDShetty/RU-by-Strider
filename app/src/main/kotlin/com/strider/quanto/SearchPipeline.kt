@@ -1,6 +1,5 @@
 package com.strider.quanto
 
-import android.util.Log
 import com.strider.quanto.eval.EvalLogger
 
 private const val TAG = "SearchPipeline"
@@ -8,10 +7,10 @@ private const val TAG = "SearchPipeline"
 /**
  * Hybrid retrieval pipeline (BEIR / RAG standard):
  *  1. Disk-backed candidate retrieval (FTS + SQL) → lexical score on subset
- *  2. Granite dense retrieve (embeddings loaded from SQLite for candidates only)
+ *  2. Granite dense retrieve (full-library scan via EmbeddingIndex RAM cache)
  *  3. RRF fuse both ranked lists
  *  4. Granite rerank top candidates
- *  5. Fallback: expanded pool + full-library dense scan when results are empty/weak
+ *  5. Fallback: expanded lexical pool; reuses primary dense scan when triggered
  */
 object SearchPipeline {
 
@@ -67,15 +66,15 @@ object SearchPipeline {
             topK            = topK,
             semanticEnabled = semanticEnabled,
             expanded        = false,
-            denseOverride   = null,
+            reuseDense      = null,
             trackHint       = trackHint
         )
 
-        val fallbackTriggered = needsFallback(primary, semanticEnabled, db)
+        val fallbackTriggered = needsFallback(primary, semanticEnabled)
         val outcome = if (!fallbackTriggered) {
             primary
         } else {
-            Log.i(TAG, "Recall fallback triggered (${primary.reason}) — expanding lexical pool")
+            RuLog.i(TAG) { "Recall fallback triggered (${primary.reason}) — expanding lexical pool" }
 
             val fallback = runSearchPass(
                 enrichedQuery = enrichedQuery,
@@ -84,12 +83,12 @@ object SearchPipeline {
                 topK            = topK,
                 semanticEnabled = semanticEnabled,
                 expanded        = true,
-                denseOverride   = null,
+                reuseDense      = primary.denseResult,
                 trackHint       = trackHint
             )
 
             if (isBetterResult(fallback, primary)) {
-                Log.i(TAG, "Fallback improved results (top ${fallback.results.firstOrNull()?.score ?: 0f})")
+                RuLog.i(TAG) { "Fallback improved results (top ${fallback.results.firstOrNull()?.score ?: 0f})" }
                 fallback
             } else {
                 primary
@@ -149,7 +148,8 @@ object SearchPipeline {
         val reason: String = "",
         val diagnostics: SearchDiagnostics? = null,
         val metrics: PassMetrics,
-        val expanded: Boolean = false
+        val expanded: Boolean = false,
+        val denseResult: DenseRetrieveResult? = null
     )
 
     private data class DenseRetrieveResult(
@@ -166,7 +166,7 @@ object SearchPipeline {
         topK: Int,
         semanticEnabled: Boolean,
         expanded: Boolean,
-        denseOverride: List<Pair<String, Float>>?,
+        reuseDense: DenseRetrieveResult?,
         trackHint: String? = null
     ): SearchPassResult {
         val startNs = System.nanoTime()
@@ -176,8 +176,13 @@ object SearchPipeline {
         var tAfterRerank = startNs
 
         val totalCount = db.getTotalCount()
-        val filenamePaths = FilenameSearch.gatherPaths(db, enrichedQuery)
-        val contentPaths = ContentSearch.gatherPaths(db, enrichedQuery)
+        val stubCache = mutableMapOf<String, IndexedFileStub>()
+        val filenamePaths = FilenameSearch.gatherPaths(
+            db, enrichedQuery, totalCount = totalCount, stubCache = stubCache
+        )
+        val contentPaths = ContentSearch.gatherPaths(
+            db, enrichedQuery, totalCount = totalCount, stubCache = stubCache
+        )
         val candidatePaths = if (expanded) {
             DiskSearch.gatherExpandedCandidatePaths(
                 db, enrichedQuery, filenamePaths, contentPaths, totalCount
@@ -189,7 +194,7 @@ object SearchPipeline {
         }
         tAfterCandidates = System.nanoTime()
 
-        if (candidatePaths.isEmpty() && denseOverride.isNullOrEmpty()) {
+        if (candidatePaths.isEmpty()) {
             return emptyPassResult(
                 enrichedQuery, db, expanded, "no candidates",
                 totalCount, filenamePaths.size, contentPaths.size, 0,
@@ -198,11 +203,7 @@ object SearchPipeline {
             )
         }
 
-        val stubs = if (candidatePaths.isNotEmpty()) {
-            db.loadStubsForPaths(candidatePaths)
-        } else {
-            emptyList()
-        }
+        val stubs = db.loadStubsForPaths(candidatePaths, stubCache)
         val stubMap = stubs.associateBy { it.path }
 
         val lexicalHits = if (stubs.isNotEmpty()) {
@@ -217,16 +218,14 @@ object SearchPipeline {
         val lexicalMap = lexicalHits.associate { it.stub.path to it.score }
 
         val denseResult: DenseRetrieveResult? = when {
-            denseOverride != null -> DenseRetrieveResult(
-                scored = denseOverride,
-                scan = DenseScanResult(denseOverride, emptyList(), db.getTotalCount()),
-                denseTopK = denseOverride.size
+            !semanticEnabled -> null
+            reuseDense != null -> reapplyLexicalPin(
+                reuseDense, lexicalHits, engine, db, totalCount
             )
-            semanticEnabled -> denseRetrieve(
+            else -> denseRetrieve(
                 enrichedQuery, lexicalHits, engine, db,
                 totalCount = totalCount, trackHint = trackHint
             )
-            else -> null
         }
         tAfterDense = System.nanoTime()
         val denseScored = denseResult?.scored ?: emptyList()
@@ -265,7 +264,8 @@ object SearchPipeline {
                 denseTop = 0f,
                 reason = reason,
                 diagnostics = buildDiagnostics(
-                    trackHint, enrichedQuery.cleanQueryForEmbedding, db, candidatePaths, lexicalHits, null,
+                    trackHint, enrichedQuery.cleanQueryForEmbedding, totalCount,
+                    candidatePaths, lexicalHits, null,
                     emptyList(), results, semanticEnabled = false, denseTopK = 0
                 ),
                 metrics = buildPassMetrics(
@@ -276,20 +276,21 @@ object SearchPipeline {
                     startNs, tAfterCandidates, tAfterLexical, tAfterDense, tAfterRerank,
                     goldenResult = goldenEval(enrichedQuery, candidatePaths, emptyList(), results)
                 ),
-                expanded = expanded
+                expanded = expanded,
+                denseResult = null
             )
         }
 
         val fusedPaths = buildRerankPaths(
             lexicalHits, denseScored, totalCount, filenamePaths, contentPaths
         )
-        val fusionStubs = db.loadStubsForPaths(fusedPaths)
+        val fusionStubs = db.loadStubsForPaths(fusedPaths, stubCache)
         val fusionStubMap = fusionStubs.associateBy { it.path }
         val embeddings = loadEmbeddings(fusedPaths)
 
         val candidates = fusedPaths.mapNotNull { path ->
             val stub = fusionStubMap[path] ?: stubMap[path] ?: run {
-                db.loadStubsForPaths(listOf(path)).firstOrNull()
+                db.loadStubsForPaths(listOf(path), stubCache).firstOrNull()
             } ?: return@mapNotNull null
             val emb = embeddings[path] ?: loadEmbeddings(listOf(path))[path] ?: return@mapNotNull null
             IndexedFile.fromStub(stub, emb)
@@ -314,7 +315,8 @@ object SearchPipeline {
                 denseTop = denseScored.firstOrNull()?.second ?: 0f,
                 reason = "candidates empty",
                 diagnostics = buildDiagnostics(
-                    trackHint, enrichedQuery.cleanQueryForEmbedding, db, candidatePaths, lexicalHits, denseResult?.scan,
+                    trackHint, enrichedQuery.cleanQueryForEmbedding, totalCount,
+                    candidatePaths, lexicalHits, denseResult?.scan,
                     fusedPaths, results, semanticEnabled = true,
                     denseTopK = denseResult?.denseTopK ?: 0
                 ),
@@ -329,7 +331,8 @@ object SearchPipeline {
                     startNs, tAfterCandidates, tAfterLexical, tAfterDense, tAfterRerank,
                     goldenResult = goldenEval(enrichedQuery, candidatePaths, fusedPaths, results)
                 ),
-                expanded = expanded
+                expanded = expanded,
+                denseResult = denseResult
             )
         }
 
@@ -361,7 +364,8 @@ object SearchPipeline {
             denseTop = denseScored.firstOrNull()?.second ?: 0f,
             reason = reason,
             diagnostics = buildDiagnostics(
-                trackHint, enrichedQuery.cleanQueryForEmbedding, db, candidatePaths, lexicalHits, denseResult?.scan,
+                trackHint, enrichedQuery.cleanQueryForEmbedding, totalCount,
+                candidatePaths, lexicalHits, denseResult?.scan,
                 fusedPaths, results, semanticEnabled = true,
                 denseTopK = denseResult?.denseTopK ?: 0
             ),
@@ -376,7 +380,8 @@ object SearchPipeline {
                 startNs, tAfterCandidates, tAfterLexical, tAfterDense, tAfterRerank,
                 goldenResult = goldenEval(enrichedQuery, candidatePaths, fusedPaths, results)
             ),
-            expanded = expanded
+            expanded = expanded,
+            denseResult = denseResult
         )
     }
 
@@ -413,7 +418,8 @@ object SearchPipeline {
             startNs, tAfterCandidates, tAfterLexical, tAfterDense, tAfterRerank,
             goldenResult = goldenEval(enrichedQuery, candidatePaths, fusedPaths, results)
         ),
-        expanded = expanded
+        expanded = expanded,
+        denseResult = null
     )
 
     private fun goldenEval(
@@ -478,7 +484,7 @@ object SearchPipeline {
     private fun buildDiagnostics(
         trackHint: String?,
         query: String,
-        db: DatabaseHelper,
+        totalIndexed: Int,
         candidatePaths: List<String>,
         lexicalHits: List<LexicalHit>,
         denseScan: DenseScanResult?,
@@ -489,7 +495,7 @@ object SearchPipeline {
     ): SearchDiagnostics? = SearchDiagnosticsBuilder.build(
         hint = trackHint,
         query = query,
-        totalIndexed = db.getTotalCount(),
+        totalIndexed = totalIndexed,
         candidatePaths = candidatePaths,
         lexicalHits = lexicalHits,
         denseScan = denseScan,
@@ -501,10 +507,9 @@ object SearchPipeline {
 
     private fun needsFallback(
         pass: SearchPassResult,
-        semanticEnabled: Boolean,
-        db: DatabaseHelper
+        semanticEnabled: Boolean
     ): Boolean {
-        if (db.getTotalCount() == 0) return false
+        if (pass.metrics.totalIndexed == 0) return false
 
         if (pass.results.isEmpty()) return true
 
@@ -556,12 +561,35 @@ object SearchPipeline {
         }
 
         val finalScored = scored.take(denseTopK)
-        Log.d(
-            TAG,
+        RuLog.d(TAG) {
             "Granite dense ($totalCount files, top-$denseTopK, cache=${db.isEmbeddingCacheWarm()}): " +
                 "${finalScored.size} hits, top: ${finalScored.firstOrNull()?.first?.substringAfterLast('/')}"
-        )
+        }
         return DenseRetrieveResult(finalScored, scan, denseTopK, queryEmb)
+    }
+
+    /** Re-pin expanded lexical hits onto a reused full-library dense result (fallback pass). */
+    private fun reapplyLexicalPin(
+        base: DenseRetrieveResult,
+        lexicalHits: List<LexicalHit>,
+        engine: EmbeddingEngine,
+        db: DatabaseHelper,
+        totalCount: Int
+    ): DenseRetrieveResult {
+        val queryEmb = base.queryEmbedding ?: return base
+        val denseTopK = base.denseTopK
+        val scored = base.scored.toMutableList()
+        val scoredPaths = scored.map { it.first }.toMutableSet()
+        val pinLexical = RetrievalScaling.denseLexicalPinCount(totalCount)
+        val pinPaths = lexicalHits.take(pinLexical).map { it.stub.path }.filter { it !in scoredPaths }
+        if (pinPaths.isEmpty()) return base
+        db.loadEmbeddingsForPaths(pinPaths).forEach { (path, emb) ->
+            scored.add(path to engine.cosineSimilarity(queryEmb, emb))
+            scoredPaths.add(path)
+        }
+        scored.sortByDescending { it.second }
+        val finalScored = scored.take(denseTopK)
+        return base.copy(scored = finalScored)
     }
 
     private fun buildRerankPaths(

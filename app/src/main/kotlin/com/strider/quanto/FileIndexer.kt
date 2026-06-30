@@ -64,7 +64,8 @@ data class IndexDirectoryResult(
 
 class FileIndexer(
     private val engine: EmbeddingEngine,
-    private val db: DatabaseHelper
+    private val db: DatabaseHelper,
+    private val appContext: android.content.Context
 ) {
 
     companion object {
@@ -94,12 +95,11 @@ class FileIndexer(
             "WhatsApp", "Media", "Pictures", "Music", "Movies"
         )
 
-        /** Batch size tuned for 4-core mid-range ARM (Redmi-class devices). */
-        private const val BATCH_SIZE = 8
+        /** Batch size tuned for 4-core mid-range ARM; adaptive via MemoryProbe. */
+        private const val BATCH_SIZE_DEFAULT = 16
+        private const val BATCH_SIZE_MIN = 4
 
-        /** Brief pause between batches to reduce sustained CPU heat. */
-        private const val BATCH_COOLDOWN_MS = 40L
-
+        /** Bulk index: thermal guard applies dynamic cooldown; OCR keeps fixed pause. */
         private const val OCR_SESSION_CAP = 200
         private const val OCR_COOLDOWN_MS = 400L
         private const val OCR_EMBED_COOLDOWN_MS = 120L
@@ -121,8 +121,8 @@ class FileIndexer(
         } else if (count > 0) {
             backfillFtsKeywords(db.loadAllPaths())
         }
-        Log.d(TAG, "Index ready — $count files (disk-backed search)")
-        Log.d(TAG, "Category counts: ${getBucketSizes()}")
+        RuLog.d(TAG) { "Index ready — $count files (disk-backed search)" }
+        RuLog.d(TAG) { "Category counts: ${getBucketSizes()}" }
     }
 
     /** Runs FTS backfill deferred from startup so the UI is not blocked. */
@@ -181,33 +181,72 @@ class FileIndexer(
         rootPath: String,
         source: String = "manual",
         scanDocumentText: Boolean = true,
+        forceFull: Boolean = false,
         phaseTracker: IndexPhaseTracker? = null,
         onProgress: suspend (String) -> Unit,
         onFileIndexed: suspend (Int, Int, Int) -> Unit
     ): IndexDirectoryResult = withContext(Dispatchers.IO) {
         val indexStartMs = System.currentTimeMillis()
 
+        if (!EmbeddingGuardrails.acquireIndexing()) {
+            Log.w(TAG, "Index skipped — heavy work mutex busy (${EmbeddingGuardrails.heavyWorkState})")
+            onProgress("Indexing paused — another task is running. Retrying…")
+            throw IllegalStateException("Heavy work mutex busy: ${EmbeddingGuardrails.heavyWorkState}")
+        }
+
+        try {
+            engine.setIndexingMode(true)
+            indexDirectoryInternal(
+                rootPath, source, scanDocumentText, forceFull, phaseTracker,
+                indexStartMs, onProgress, onFileIndexed
+            )
+        } finally {
+            engine.setIndexingMode(false)
+            EmbeddingGuardrails.releaseIndexing()
+        }
+    }
+
+    private suspend fun indexDirectoryInternal(
+        rootPath: String,
+        source: String,
+        scanDocumentText: Boolean,
+        forceFull: Boolean,
+        phaseTracker: IndexPhaseTracker?,
+        indexStartMs: Long,
+        onProgress: suspend (String) -> Unit,
+        onFileIndexed: suspend (Int, Int, Int) -> Unit
+    ): IndexDirectoryResult {
+
         val root = File(rootPath)
         if (!root.exists() || !root.canRead()) {
-            onProgress("Cannot read $rootPath — check permissions")
-            return@withContext IndexDirectoryResult(0, 0, 0, 0)
+            onProgress("Cannot read $rootPath — check storage permissions")
+            throw SecurityException("Storage not readable: grant full file access and retry")
         }
 
         phaseTracker?.begin("disk_scan")
 
         val storedMeta = db.getStoredFileMeta()
-        Log.d(TAG, "Stored in DB: ${storedMeta.size} files")
+        RuLog.d(TAG) { "Stored in DB: ${storedMeta.size} files" }
 
         onProgress("Scanning storage for files… (this can take a few minutes)")
 
-        val allDiskFiles = root.walkTopDown()
+        val allDiskFiles = mutableListOf<File>()
+        var lastScanReportMs = System.currentTimeMillis()
+        val walker = root.walkTopDown()
             .onEnter { dir ->
                 val path = dir.absolutePath
                 SKIP_DIRS.none { s -> path.contains(s) }
             }
-            .filter { it.isFile }
-            .filter { it.extension.lowercase() in SUPPORTED_EXTENSIONS }
-            .toList()
+        for (node in walker) {
+            if (node.isFile && node.extension.lowercase() in SUPPORTED_EXTENSIONS) {
+                allDiskFiles.add(node)
+            }
+            val now = System.currentTimeMillis()
+            if (now - lastScanReportMs >= 2_000L) {
+                lastScanReportMs = now
+                onProgress("Scanning storage… ${allDiskFiles.size} files found so far")
+            }
+        }
 
         onProgress("Found ${allDiskFiles.size} supported files — indexing all…")
 
@@ -221,38 +260,67 @@ class FileIndexer(
             )
         )
 
-        Log.d(TAG, "Files on disk: ${diskFiles.size} — indexing all supported files")
+        RuLog.d(TAG) { "Files on disk: ${diskFiles.size} — indexing all supported files" }
 
         val diskPaths = diskFiles.map { it.absolutePath }.toSet()
         val deletedPaths = storedMeta.keys.filter { it !in diskPaths }
         if (deletedPaths.isNotEmpty()) {
             db.deleteFiles(deletedPaths)
-            Log.d(TAG, "Deleted ${deletedPaths.size} stale records")
+            RuLog.d(TAG) { "Deleted ${deletedPaths.size} stale records" }
         }
 
-        val toIndex = diskFiles.filter { file ->
-            val stored = storedMeta[file.absolutePath]
-            when {
-                stored == null -> true
-                stored.first != file.lastModified() -> true
-                stored.second != file.length() -> true
-                else -> false
+        val toIndex = if (forceFull) {
+            diskFiles
+        } else {
+            diskFiles.filter { file ->
+                val stored = storedMeta[file.absolutePath]
+                when {
+                    stored == null -> true
+                    stored.first != file.lastModified() -> true
+                    stored.second != file.length() -> true
+                    else -> false
+                }
             }
         }
 
-        Log.d(TAG, "To index: ${toIndex.size}, Skipped (unchanged): ${diskFiles.size - toIndex.size}")
+        RuLog.d(TAG) { "To index: ${toIndex.size}, Skipped (unchanged): ${diskFiles.size - toIndex.size}" }
+
+        val skippedCount = if (forceFull) 0 else diskFiles.size - toIndex.size
 
         phaseTracker?.end("disk_scan", fileCount = toIndex.size)
 
+        onProgress(
+            if (toIndex.isEmpty()) {
+                "All ${diskFiles.size} files up to date — nothing new to index"
+            } else {
+                "Indexing ${toIndex.size} files ($skippedCount unchanged)…"
+            }
+        )
+
+        if (toIndex.isEmpty()) {
+            return IndexDirectoryResult(
+                indexedCount = 0,
+                skippedCount = skippedCount,
+                deletedCount = deletedPaths.size,
+                ocrPendingCount = if (scanDocumentText) db.getOcrPendingCount() else 0
+            )
+        }
+
         if (toIndex.size >= 50 && db.isEmbeddingCacheWarm()) {
-            Log.i(TAG, "Bulk index — releasing embedding RAM cache to reduce memory pressure")
+            RuLog.i(TAG) { "Bulk index — releasing embedding RAM cache to reduce memory pressure" }
             db.invalidateEmbeddingCache()
         }
 
         var indexedCount = 0
-        val skippedCount = diskFiles.size - toIndex.size
 
-        toIndex.chunked(BATCH_SIZE).forEach { batch ->
+        var batchSize = EmbeddingGuardrails.MemoryProbe.recommendedBatchSize(appContext, BATCH_SIZE_DEFAULT)
+        var batchIndex = 0
+        var consecutiveSingleFileFailures = 0
+        var successfulBatchesAtSize = 0
+
+        val pending = toIndex.toMutableList()
+        while (pending.isNotEmpty()) {
+            val batch = pending.take(batchSize)
             try {
                 onProgress("Indexing batch of ${batch.size}… (${db.getTotalCount()} total so far)")
 
@@ -265,11 +333,23 @@ class FileIndexer(
                         if (!ok) Log.w(TAG, "Skipping blank metadata")
                     }
                 }
-                if (pairs.isEmpty()) return@forEach
+                if (pairs.isEmpty()) {
+                    pending.subList(0, batch.size).clear()
+                    batchIndex++
+                    continue
+                }
 
                 val texts = pairs.map { it.second.metadataString }
                 phaseTracker?.begin("embedding")
-                val embeddings = engine.embedBatch(texts)
+                val embeddings = try {
+                    engine.embedBatch(texts)
+                } catch (e: OutOfMemoryError) {
+                    Log.e(TAG, "OOM on batch ${batch.size} — halving", e)
+                    db.invalidateEmbeddingCache()
+                    batchSize = (batchSize / 2).coerceAtLeast(BATCH_SIZE_MIN)
+                    successfulBatchesAtSize = 0
+                    throw e
+                }
                 phaseTracker?.end("embedding", fileCount = texts.size)
 
                 phaseTracker?.begin("persist")
@@ -293,20 +373,45 @@ class FileIndexer(
                     db.ftsInsert(file.absolutePath, keywords)
                     indexedCount++
                     onFileIndexed(indexedCount, skippedCount, deletedPaths.size)
-                    Log.d(TAG, "Indexed [${metadata.categories.joinToString { it.label }}] ${file.name}")
+                    RuLog.d(TAG) { "Indexed [${metadata.categories.joinToString { it.label }}] ${file.name}" }
                 }
                 phaseTracker?.end("persist", fileCount = pairs.size)
 
-                if (BATCH_COOLDOWN_MS > 0) delay(BATCH_COOLDOWN_MS)
+                pending.subList(0, batch.size).clear()
+                consecutiveSingleFileFailures = 0
+                successfulBatchesAtSize++
+                if (successfulBatchesAtSize >= 10 && batchSize < BATCH_SIZE_DEFAULT) {
+                    batchSize = (batchSize * 2).coerceAtMost(BATCH_SIZE_DEFAULT)
+                    successfulBatchesAtSize = 0
+                }
+
+                val cooldown = EmbeddingGuardrails.ThermalGuard.batchCooldownMs(appContext, batchIndex)
+                if (cooldown > 0) delay(cooldown)
+                batchIndex++
+            } catch (e: OutOfMemoryError) {
+                if (batchSize > BATCH_SIZE_MIN) {
+                    batchSize = (batchSize / 2).coerceAtLeast(BATCH_SIZE_MIN)
+                    db.invalidateEmbeddingCache()
+                    continue
+                }
+                Log.e(TAG, "OOM at minimum batch size", e)
+                break
             } catch (e: Exception) {
                 Log.e(TAG, "Batch failed, falling back to single-file: ${e.message}", e)
                 for (file in batch) {
+                    if (consecutiveSingleFileFailures >= 3) {
+                        Log.e(TAG, "Skipping remainder of batch after 3 consecutive failures")
+                        break
+                    }
                     try {
                         onProgress("Indexing: ${file.name}")
                         phaseTracker?.begin("metadata_extraction")
-                        val metadata  = buildFileMetadata(file)
+                        val metadata = buildFileMetadata(file)
                         phaseTracker?.end("metadata_extraction", fileCount = 1)
-                        if (metadata.metadataString.isBlank()) continue
+                        if (metadata.metadataString.isBlank()) {
+                            pending.remove(file)
+                            continue
+                        }
                         phaseTracker?.begin("embedding")
                         val embedding = engine.embed(metadata.metadataString)
                         phaseTracker?.end("embedding", fileCount = 1)
@@ -332,17 +437,22 @@ class FileIndexer(
                         phaseTracker?.end("persist", fileCount = 1)
                         indexedCount++
                         onFileIndexed(indexedCount, skippedCount, deletedPaths.size)
+                        pending.remove(file)
+                        consecutiveSingleFileFailures = 0
                     } catch (inner: Exception) {
+                        consecutiveSingleFileFailures++
                         Log.e(TAG, "Failed to index ${file.name}: ${inner.message}", inner)
                     }
                 }
+                pending.subList(0, minOf(batch.size, pending.size)).clear()
+                batchIndex++
             }
         }
 
         // Defer RAM warm — loading full matrix while ONNX is active causes OOM on large libraries.
-        Log.d(TAG, "Index ready — ${db.getTotalCount()} files (disk-backed search)")
+        RuLog.d(TAG) { "Index ready — ${db.getTotalCount()} files (disk-backed search)" }
         val ocrPendingCount = if (scanDocumentText) db.getOcrPendingCount() else 0
-        Log.d(TAG, "Done — indexed:$indexedCount skipped:$skippedCount deleted:${deletedPaths.size} total:$size ocrPending:$ocrPendingCount")
+        RuLog.d(TAG) { "Done — indexed:$indexedCount skipped:$skippedCount deleted:${deletedPaths.size} total:$size ocrPending:$ocrPendingCount" }
         if (EvalLogger.enabled) {
             val phases = phaseTracker?.snapshot().orEmpty()
             EvalLogger.logIndexPhases(phases, source)
@@ -354,10 +464,12 @@ class FileIndexer(
                 totalFiles = size,
                 durationMs = System.currentTimeMillis() - indexStartMs,
                 categoryCounts = getBucketSizes(),
-                phases = phases
+                phases = phases,
+                embeddingBackend = engine.currentBackend.label,
+                modelVersion = BuildConfig.MODEL_VERSION
             )
         }
-        IndexDirectoryResult(
+        return IndexDirectoryResult(
             indexedCount = indexedCount,
             skippedCount = skippedCount,
             deletedCount = deletedPaths.size,
@@ -390,7 +502,7 @@ class FileIndexer(
             file, metadata.contentSnippet, metadata, metadata.pdfMetadata
         )
         db.ftsInsert(file.absolutePath, keywords)
-        Log.d(TAG, "OCR re-indexed ${file.name}")
+        RuLog.d(TAG) { "OCR re-indexed ${file.name}" }
     }
 
     suspend fun processOcrPending(
@@ -453,7 +565,7 @@ class FileIndexer(
                 }
             }
         }
-        Log.d(TAG, "FTS keywords backfilled for $count files")
+        RuLog.d(TAG) { "FTS keywords backfilled for $count files" }
     }
 
     fun search(

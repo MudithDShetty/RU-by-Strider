@@ -52,6 +52,7 @@ class StriderApp : Application() {
             return phase == InitPhase.MODEL_DOWNLOAD ||
                 phase == InitPhase.MODEL_COPY ||
                 phase == InitPhase.MODEL_LOAD ||
+                phase == InitPhase.MODEL_WARMUP ||
                 (phase != InitPhase.READY && isFirstModelLoad)
         }
 
@@ -78,6 +79,7 @@ class StriderApp : Application() {
         instance = this
         FilePreviewLoader.init(this)
         EvalLogger.init(this)
+        EmbeddingGuardrails.installCrashHandler(this)
         createNotificationChannel()
         startEngineInit()
     }
@@ -147,16 +149,56 @@ class StriderApp : Application() {
         startEngineInit()
     }
 
+    suspend fun ensureFp32ModelReady(
+        onProgress: (fraction: Float, message: String) -> Unit = { _, _ -> }
+    ): Boolean {
+        val delivery = modelDelivery ?: ModelAssetDelivery(this).also { modelDelivery = it }
+        return delivery.ensureFp32Ready(onProgress)
+    }
+
+    /** Return visit: valid INT8 on disk from a prior successful setup. */
+    private fun isRepeatLaunchFastPath(): Boolean {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        if (!prefs.getBoolean(PREF_MODEL_COPIED, false)) return false
+        return (modelDelivery ?: ModelAssetDelivery(this)).isCachedInt8ModelValid()
+    }
+
+    private fun reportModelDownloadProgress(fraction: Float, message: String) {
+        val pct = (3 + fraction * 42).toInt().coerceIn(3, 45)
+        reportProgress(InitPhase.MODEL_DOWNLOAD, message, pct)
+    }
+
+    private fun reportModelLoadProgress(fraction: Float, message: String) {
+        val pct = (45 + fraction * 25).toInt().coerceIn(45, 70)
+        reportProgress(InitPhase.MODEL_LOAD, message, pct)
+    }
+
+    private fun reportModelWarmupProgress(fraction: Float, message: String) {
+        val pct = (70 + fraction * 15).toInt().coerceIn(70, 85)
+        reportProgress(InitPhase.MODEL_WARMUP, message, pct)
+    }
+
+    private fun reportIndexLoadProgress(message: String) {
+        reportProgress(InitPhase.INDEX_LOAD, message, 90)
+    }
+
     private fun startEngineInit() {
         if (!initStarted.compareAndSet(false, true)) return
 
         applicationScope.launch(Dispatchers.IO) {
             try {
+                val fastPath = isRepeatLaunchFastPath()
+                if (!fastPath) {
+                    Log.i(TAG, "First-install init path")
+                } else {
+                    Log.i(TAG, "Repeat-launch fast init path")
+                }
+
                 if (!::db.isInitialized) {
                     reportProgress(InitPhase.DB, "Starting…", 2)
                     db = DatabaseHelper(this@StriderApp)
                     engine = EmbeddingEngine(this@StriderApp)
-                    indexer = FileIndexer(engine, db)
+                    indexer = FileIndexer(engine, db, this@StriderApp)
                 }
 
                 // Load file index in parallel — does not need the ONNX session
@@ -164,7 +206,9 @@ class StriderApp : Application() {
                     launch {
                         val count = db.getTotalCount()
                         if (count > 0) {
-                            reportProgress(InitPhase.INDEX_LOAD, "Loading $count indexed files…", 88)
+                            if (!fastPath) {
+                                reportIndexLoadProgress("Loading $count indexed files…")
+                            }
                             indexer.loadFromDatabase(deferFtsBackfill = true)
                         }
                         indexReadyFlag.set(true)
@@ -178,14 +222,6 @@ class StriderApp : Application() {
 
                         if (count > 0) {
                             launch { indexer.runDeferredFtsBackfill() }
-                            launch {
-                                if (isMainIndexingActive()) {
-                                    Log.i(TAG, "Skipping startup embedding warm — indexing already running")
-                                } else {
-                                    db.warmEmbeddingCache()
-                                    Log.i(TAG, "Embedding RAM cache ready: ${db.isEmbeddingCacheWarm()} (${indexer.size} files)")
-                                }
-                            }
                             val scanDocumentText = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                                 .getBoolean(PREF_SCAN_DOCUMENT_TEXT, true)
                             if (scanDocumentText && db.getOcrPendingCount() > 0) {
@@ -201,24 +237,41 @@ class StriderApp : Application() {
                 }
 
                 val delivery = ModelAssetDelivery(this@StriderApp).also { modelDelivery = it }
+                val fp32Progress: (Float, String) -> Unit = { fraction, message ->
+                    if (!fastPath) reportModelWarmupProgress(fraction, message)
+                }
+                engine.fp32ModelProvider = { ensureFp32ModelReady(fp32Progress) }
+
                 delivery.ensureModelReady { fraction, message ->
-                    val pct = (3 + fraction * 47).toInt().coerceIn(3, 50)
-                    reportProgress(InitPhase.MODEL_DOWNLOAD, message, pct)
+                    if (fastPath) {
+                        reportModelLoadProgress(0.02f, message)
+                    } else {
+                        reportModelDownloadProgress(fraction, message)
+                    }
                 }
 
-                engine.initialize { fraction, message ->
-                    val pct = (50 + fraction * 30).toInt().coerceIn(50, 80)
-                    reportProgress(InitPhase.MODEL_LOAD, message, pct)
+                engine.initialize(
+                    fastPath = fastPath,
+                    forceReprobe = !fastPath
+                ) { fraction, message ->
+                    reportModelLoadProgress(fraction, message)
                 }
 
-                engine.embed("warmup", countTowardRefresh = false)
+                if (!fastPath) {
+                    reportModelWarmupProgress(0.1f, "Warming up…")
+                    engine.embed("warmup", countTowardRefresh = false)
+                    reportModelWarmupProgress(1f, "Warmup complete")
+                }
+
                 engineReadyFlag.set(true)
-                Log.d(TAG, "Engine ready")
+                Log.d(TAG, "Engine ready backend=${engine.currentBackend.label}")
+
+                maybeScheduleEmbeddingReindex()
 
                 getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit()
                     .putBoolean(PREF_SETUP_COMPLETE, true)
-                    .apply()
+                    .commit()
 
                 synchronized(readyListeners) {
                     val listeners = readyListeners.toList()
@@ -228,6 +281,14 @@ class StriderApp : Application() {
 
                 indexJob?.join()
                 reportProgress(InitPhase.READY, "Ready", 100)
+
+                scheduleDeferredEmbeddingWarmIfNeeded()
+
+                if (fastPath) {
+                    applicationScope.launch(Dispatchers.IO) {
+                        engine.runDeferredQualityAndWarmup()
+                    }
+                }
 
                 synchronized(progressListeners) { progressListeners.clear() }
             } catch (e: ModelDeliveryException) {
@@ -258,9 +319,10 @@ class StriderApp : Application() {
             .addTag(IndexingWorker.WORK_TAG)
             .build()
 
+        val policy = if (isMainIndexingActive()) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE
         WorkManager.getInstance(this).enqueueUniqueWork(
             IndexingWorker.UNIQUE_WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
+            policy,
             request
         )
     }
@@ -295,9 +357,14 @@ class StriderApp : Application() {
         applicationScope.launch(Dispatchers.IO) {
             delay(DEFERRED_WARM_DELAY_MS)
             if (db.isEmbeddingCacheWarm() || isMainIndexingActive()) return@launch
-            Log.i(TAG, "Deferred embedding cache warm (${db.getTotalCount()} files)…")
-            db.warmEmbeddingCache()
-            Log.i(TAG, "Deferred warm finished: cache=${db.isEmbeddingCacheWarm()}")
+            if (!EmbeddingGuardrails.tryAcquireWarming()) return@launch
+            try {
+                Log.i(TAG, "Deferred embedding cache warm (${db.getTotalCount()} files)…")
+                db.warmEmbeddingCache()
+                Log.i(TAG, "Deferred warm finished: cache=${db.isEmbeddingCacheWarm()}")
+            } finally {
+                EmbeddingGuardrails.releaseWarming()
+            }
         }
     }
 
@@ -310,6 +377,54 @@ class StriderApp : Application() {
                 it.state == WorkInfo.State.ENQUEUED ||
                 it.state == WorkInfo.State.BLOCKED
         }
+    }
+
+    private fun maybeScheduleEmbeddingReindex() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val stored = prefs.getInt(PREF_EMBEDDING_MODEL_VERSION, 0)
+        if (stored >= BuildConfig.MODEL_VERSION) return
+        if (!StorageAccess.canIndexStorage(this)) {
+            Log.i(TAG, "Embedding model version changed — deferring force re-index until storage access granted")
+            prefs.edit().putBoolean(PREF_PENDING_FORCE_REINDEX, true).apply()
+            return
+        }
+        Log.i(TAG, "Embedding model version changed ($stored → ${BuildConfig.MODEL_VERSION}) — force re-index")
+        enqueueIndexing(forceFull = true)
+    }
+
+    fun consumePendingForceReindexIfNeeded() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        if (!prefs.getBoolean(PREF_PENDING_FORCE_REINDEX, false)) return
+        if (!isEngineReady || !StorageAccess.canIndexStorage(this)) return
+        prefs.edit().remove(PREF_PENDING_FORCE_REINDEX).apply()
+        if (needsEmbeddingReindex()) {
+            Log.i(TAG, "Running deferred force re-index after storage access granted")
+            enqueueIndexing(forceFull = true)
+        }
+    }
+
+    fun hasPendingForceReindex(): Boolean =
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .getBoolean(PREF_PENDING_FORCE_REINDEX, false)
+
+    fun clearPendingForceReindex() {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .remove(PREF_PENDING_FORCE_REINDEX)
+            .apply()
+    }
+
+    fun markEmbeddingModelSynced() {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putInt(PREF_EMBEDDING_MODEL_VERSION, BuildConfig.MODEL_VERSION)
+            .apply()
+    }
+
+    fun needsEmbeddingReindex(): Boolean {
+        val stored = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .getInt(PREF_EMBEDDING_MODEL_VERSION, 0)
+        return stored < BuildConfig.MODEL_VERSION
     }
 
     fun schedulePeriodicIndexing(enabled: Boolean) {
@@ -352,6 +467,10 @@ class StriderApp : Application() {
         const val PREFS_NAME = "strider_quanto_prefs"
         const val PREF_MODEL_COPIED = "model_copied"
         const val PREF_MODEL_VERSION = "model_version"
+        const val PREF_MODEL_SHA_VERIFIED = "model_sha_verified"
+        const val PREF_MODEL_FP32_SHA_VERIFIED = "model_fp32_sha_verified"
+        const val PREF_EMBEDDING_MODEL_VERSION = "embedding_model_version"
+        const val PREF_PENDING_FORCE_REINDEX = "pending_force_reindex"
         const val PREF_SETUP_COMPLETE = "setup_complete"
         const val PREF_SCAN_DOCUMENT_TEXT = "scan_document_text_enabled"
         const val NOTIFICATION_CHANNEL_ID = "indexing_channel"

@@ -27,11 +27,13 @@
             android:paddingStart="@dimen/ru_content_padding_h"
             android:paddingEnd="@dimen/ru_content_padding_h">
 
-            <TextView
-                android:id="@+id/tvIndexWordmark"
-                style="@style/RuText.Wordmark"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
+            <ImageView
+                android:id="@+id/ivIndexWordmark"
+                android:layout_width="@dimen/index_brand_logo_size"
+                android:layout_height="@dimen/index_brand_logo_size"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ru_brand_logo"
+                android:contentDescription="@string/app_name"/>
 
             <TextView
                 android:layout_width="wrap_content"
@@ -71,6 +73,7 @@
                         android:includeFontPadding="false"/>
 
                     <TextView
+                        android:id="@+id/tvDialLabel"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/index_files_label"

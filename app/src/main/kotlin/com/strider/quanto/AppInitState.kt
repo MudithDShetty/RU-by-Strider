@@ -5,6 +5,7 @@ enum class InitPhase {
     MODEL_DOWNLOAD,
     MODEL_COPY,
     MODEL_LOAD,
+    MODEL_WARMUP,
     INDEX_LOAD,
     READY
 }

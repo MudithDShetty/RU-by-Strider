@@ -72,17 +72,20 @@
         android:alpha="0"
         android:elevation="12dp">
 
-        <TextView
-            android:id="@+id/tvResultsWordmark"
-            style="@style/RuText.ResultsWordmark"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
+        <ImageView
+            android:id="@+id/ivResultsWordmark"
+            android:layout_width="@dimen/results_top_logo_size"
+            android:layout_height="@dimen/results_top_logo_size"
+            android:layout_gravity="start"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ru_brand_logo"
+            android:contentDescription="@string/app_name"/>
 
         <FrameLayout
             android:id="@+id/flResultsSearchHost"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="13dp"/>
+            android:layout_marginTop="10dp"/>
     </LinearLayout>
 
     <androidx.core.widget.NestedScrollView
@@ -113,11 +116,13 @@
                 android:paddingStart="@dimen/ru_content_padding_h"
                 android:paddingEnd="@dimen/ru_content_padding_h">
 
-                <TextView
-                    android:id="@+id/tvHomeWordmark"
-                    style="@style/RuText.Wordmark"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"/>
+                <ImageView
+                    android:id="@+id/ivHomeWordmark"
+                    android:layout_width="@dimen/home_brand_logo_size"
+                    android:layout_height="@dimen/home_brand_logo_size"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ru_brand_logo"
+                    android:contentDescription="@string/app_name"/>
 
                 <FrameLayout
                     android:layout_width="match_parent"
@@ -195,7 +200,7 @@
                             android:layout_height="match_parent"
                             android:layout_weight="1"
                             android:layout_marginStart="10dp"
-                            android:layout_marginEnd="8dp"
+                            android:layout_marginEnd="4dp"
                             android:clipChildren="true"
                             android:clipToPadding="true">
 
@@ -256,24 +261,32 @@
                                 android:visibility="gone"/>
                         </FrameLayout>
 
-                        <ImageButton
-                            android:id="@+id/btnClearSearch"
-                            android:layout_width="30dp"
-                            android:layout_height="30dp"
-                            android:layout_marginEnd="4dp"
-                            android:src="@drawable/ic_close"
-                            android:background="?attr/selectableItemBackgroundBorderless"
-                            android:padding="5dp"
-                            app:tint="@color/text_secondary"
-                            android:visibility="gone"
-                            android:contentDescription="@string/results_clear"/>
+                        <FrameLayout
+                            android:id="@+id/flClearSearch"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:layout_marginEnd="0dp"
+                            android:visibility="gone">
+
+                            <ImageButton
+                                android:id="@+id/btnClearSearch"
+                                android:layout_width="30dp"
+                                android:layout_height="30dp"
+                                android:layout_gravity="center"
+                                android:src="@drawable/ic_close"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:padding="5dp"
+                                app:tint="@color/text_secondary"
+                                android:visibility="gone"
+                                android:contentDescription="@string/results_clear"/>
+                        </FrameLayout>
 
                         <!-- Mic and enter share one slot — toggled in MainActivity -->
                         <FrameLayout
                             android:id="@+id/flSearchAction"
                             android:layout_width="@dimen/home_mic_size"
                             android:layout_height="@dimen/home_mic_size"
-                            android:layout_marginEnd="6dp">
+                            android:layout_marginEnd="4dp">
 
                             <ImageButton
                                 android:id="@+id/btnSearch"
@@ -394,7 +407,8 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:clickable="true"
-            android:focusable="true">
+            android:focusable="true"
+            android:contentDescription="@string/a11y_results_sheet_drag">
 
             <View
                 android:id="@+id/vSheetHandle"
@@ -408,10 +422,10 @@
                 android:id="@+id/tvResultsCount"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingStart="24dp"
-                android:paddingEnd="24dp"
-                android:paddingTop="13dp"
-                android:paddingBottom="8dp"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="6dp"
                 android:textSize="20sp"
                 android:fontFamily="@font/fraunces_semibold"
                 android:textColor="@color/text_primary"/>
@@ -476,7 +490,8 @@
                 <TextView
                     android:id="@+id/btnShareCancel"
                     android:layout_width="wrap_content"
-                    android:layout_height="36dp"
+                    android:layout_height="48dp"
+                    android:minWidth="48dp"
                     android:gravity="center"
                     android:text="@string/share_picker_cancel"
                     android:textSize="12sp"
@@ -491,7 +506,8 @@
                 <TextView
                     android:id="@+id/btnShareNext"
                     android:layout_width="wrap_content"
-                    android:layout_height="36dp"
+                    android:layout_height="48dp"
+                    android:minWidth="48dp"
                     android:gravity="center"
                     android:text="@string/share_picker_next"
                     android:textSize="12sp"
@@ -507,7 +523,8 @@
                 <TextView
                     android:id="@+id/btnShareConfirm"
                     android:layout_width="wrap_content"
-                    android:layout_height="36dp"
+                    android:layout_height="48dp"
+                    android:minWidth="48dp"
                     android:gravity="center"
                     android:text="@string/share_picker_send"
                     android:textSize="12sp"
@@ -522,29 +539,77 @@
             </LinearLayout>
         </LinearLayout>
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rvResults"
+        <FrameLayout
+            android:id="@+id/flResultsList"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="24dp"
-            android:clipToPadding="false"
-            android:overScrollMode="never"
-            android:focusable="false"
-            android:focusableInTouchMode="false"
-            app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"/>
+            android:layout_weight="1">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvResults"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="24dp"
+                android:clipToPadding="false"
+                android:overScrollMode="never"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
+                app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"/>
+
+            <LinearLayout
+                android:id="@+id/llResultsEmpty"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="40dp"
+                android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvResultsEmptyTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:textSize="16sp"
+                android:textColor="@color/text_primary"
+                android:fontFamily="@font/hanken_grotesk_medium"/>
+
+            <TextView
+                android:id="@+id/tvResultsEmptySub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:textSize="14sp"
+                android:textColor="@color/text_secondary"
+                android:fontFamily="@font/hanken_grotesk_regular"
+                android:lineSpacingMultiplier="1.4"/>
+
+            <TextView
+                android:id="@+id/btnResultsEmptyAction"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginTop="16dp"
+                android:gravity="center"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:text="@string/results_empty_go_index"
+                android:textSize="14sp"
+                android:textColor="@color/ru_crimson"
+                android:fontFamily="@font/hanken_grotesk_semibold"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:visibility="gone"/>
+            </LinearLayout>
+        </FrameLayout>
 
         <TextView
             android:id="@+id/tvResultsEmpty"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:padding="40dp"
-            android:textSize="14sp"
-            android:textColor="@color/text_secondary"
-            android:fontFamily="@font/hanken_grotesk_regular"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
             android:visibility="gone"/>
 
         <TextView

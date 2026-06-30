@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <View
+            android:layout_width="@dimen/onboarding_bullet_size"
+            android:layout_height="@dimen/onboarding_bullet_size"
+            android:layout_marginTop="@dimen/onboarding_bullet_margin_top"
+            android:layout_marginEnd="@dimen/onboarding_bullet_gap"
+            android:importantForAccessibility="no"
+            android:background="@drawable/ic_perm_bullet"/>
+
+        <TextView
+            android:id="@+id/tvOnboardingPermWhat"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/onboarding_perm_what"
+            android:textSize="13.5sp"
+            android:textColor="@color/text_primary"
+            android:lineSpacingMultiplier="1.45"
+            android:fontFamily="@font/hanken_grotesk_regular"/>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/onboarding_bullet_row_gap"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <View
+            android:layout_width="@dimen/onboarding_bullet_size"
+            android:layout_height="@dimen/onboarding_bullet_size"
+            android:layout_marginTop="@dimen/onboarding_bullet_margin_top"
+            android:layout_marginEnd="@dimen/onboarding_bullet_gap"
+            android:importantForAccessibility="no"
+            android:background="@drawable/ic_perm_bullet"/>
+
+        <TextView
+            android:id="@+id/tvOnboardingPermWhy"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/onboarding_perm_why"
+            android:textSize="13.5sp"
+            android:textColor="@color/text_primary"
+            android:lineSpacingMultiplier="1.45"
+            android:fontFamily="@font/hanken_grotesk_regular"/>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/onboarding_bullet_row_gap"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <View
+            android:layout_width="@dimen/onboarding_bullet_size"
+            android:layout_height="@dimen/onboarding_bullet_size"
+            android:layout_marginTop="@dimen/onboarding_bullet_margin_top"
+            android:layout_marginEnd="@dimen/onboarding_bullet_gap"
+            android:importantForAccessibility="no"
+            android:background="@drawable/ic_perm_bullet"/>
+
+        <TextView
+            android:id="@+id/tvOnboardingPermPrivacy"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/onboarding_perm_privacy"
+            android:textSize="13.5sp"
+            android:textColor="@color/text_primary"
+            android:lineSpacingMultiplier="1.45"
+            android:fontFamily="@font/hanken_grotesk_regular"/>
+
+    </LinearLayout>
+
+</LinearLayout>

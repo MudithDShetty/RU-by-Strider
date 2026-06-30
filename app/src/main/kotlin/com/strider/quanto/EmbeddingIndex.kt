@@ -4,6 +4,8 @@ import android.util.Log
 
 private const val TAG = "EmbeddingIndex"
 private const val DIM = EmbeddingEngine.EMBEDDING_DIM
+/** Debug rank tracking only — caps work when broad hints match many paths. */
+private const val MAX_TRACKED_HINT_PATHS = 8
 
 /**
  * In-memory embedding matrix for fast full-library dense scan.
@@ -92,6 +94,20 @@ class EmbeddingIndex {
         }
     }
 
+    fun getEmbeddings(paths: Collection<String>): Map<String, FloatArray> {
+        if (paths.isEmpty()) return emptyMap()
+        synchronized(lock) {
+            if (state != State.WARM || rowCount == 0) return emptyMap()
+            val result = HashMap<String, FloatArray>(paths.size)
+            for (path in paths) {
+                val row = pathToRow[path] ?: continue
+                val off = row * DIM
+                result[path] = FloatArray(DIM) { j -> matrix[off + j] }
+            }
+            return result
+        }
+    }
+
     fun remove(pathsToRemove: Collection<String>) {
         if (pathsToRemove.isEmpty()) return
         synchronized(lock) {
@@ -120,6 +136,15 @@ class EmbeddingIndex {
             pathToRow = HashMap<String, Int>(rowCount * 2).also { map ->
                 paths.forEachIndexed { idx, p -> map[p] = idx }
             }
+        }
+    }
+
+    fun renamePath(oldPath: String, newPath: String) {
+        synchronized(lock) {
+            if (state != State.WARM) return
+            val row = pathToRow.remove(oldPath) ?: return
+            paths[row] = newPath
+            pathToRow[newPath] = row
         }
     }
 
@@ -154,7 +179,10 @@ class EmbeddingIndex {
                 for (j in 0 until DIM) dot += queryEmb[j] * matrix[off + j]
                 dot = dot.coerceIn(-1f, 1f)
 
-                if (pathMatchesHint(path)) {
+                if (pathMatchesHint(path) &&
+                    trackedScores.size < MAX_TRACKED_HINT_PATHS &&
+                    path !in trackedScores
+                ) {
                     trackedScores[path] = dot
                     higherCounts.putIfAbsent(path, 0)
                 }
@@ -174,7 +202,8 @@ class EmbeddingIndex {
                 )
             }.sortedBy { it.rank }
 
-            return DenseScanResult(top.sortedByDescending { it.second }, tracked, rowCount)
+            val topOut = if (top.size == topK) top else top.sortedByDescending { it.second }
+            return DenseScanResult(topOut, tracked, rowCount)
         }
     }
 

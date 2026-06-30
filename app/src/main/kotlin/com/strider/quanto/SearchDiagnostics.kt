@@ -161,7 +161,9 @@ object SearchDiagnosticsBuilder {
                 semanticEnabled = semanticEnabled
             )
         ).also {
-            it.targetReport?.logToLogcat()
+            if (BuildConfig.DEBUG) {
+                it.targetReport?.logToLogcat()
+            }
             if (BuildConfig.DEBUG && !query.isNullOrBlank()) {
                 SearchEval.evaluate(query, candidatePaths, fusedPaths, results)?.let { golden ->
                     SearchEval.logEvaluation(golden)

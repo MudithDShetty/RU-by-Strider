@@ -30,8 +30,14 @@ import android.webkit.MimeTypeMap
 import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
+import android.widget.CompoundButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.switchmaterial.SwitchMaterial
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.work.WorkInfo
@@ -83,6 +89,16 @@ class MainActivity : AppCompatActivity() {
     private var taglineToggle = false
     private var taglineCycleActive = false
     private var taglineCycleRunnable: Runnable? = null
+    private val loadingTitleHandler = Handler(Looper.getMainLooper())
+    private var loadingTitleToggle = false
+    private var loadingTitleCycleActive = false
+    private var loadingTitleCycleRunnable: Runnable? = null
+    private var keepSplashScreen = true
+    private var modelLoadingVisible = false
+    private var modelLoadingDismissPosted = false
+    private var indexFailed = false
+    private var systemBarTop = 0
+    private var systemBarBottom = 0
     private var eqAnimators: List<ObjectAnimator>? = null
     private var micBreatheAnimator: ObjectAnimator? = null
     private var micRingAnimators: List<ObjectAnimator>? = null
@@ -90,6 +106,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var skeletonAdapter: SkeletonResultsAdapter
     private lateinit var homeResultsUi: HomeResultsUi
     private lateinit var searchHintScroller: SearchHintScroller
+    private var homeLogoSpinner: HomeLogoSpinner? = null
 
     private lateinit var prefs: SharedPreferences
     private lateinit var voiceSearchManager: VoiceSearchManager
@@ -104,7 +121,40 @@ class MainActivity : AppCompatActivity() {
     private var pendingShareResults: List<SearchResult>? = null
     private var pendingShareIndex = 0
     private var pendingShareTarget: String? = null
+
+    private val resultFileActionCallbacks = object : ResultFileActions.Callbacks {
+        override fun onShareStarted(file: IndexedFile) {
+            showToast(getString(R.string.shared_ok))
+        }
+
+        override fun onFileRenamed(oldPath: String, updated: IndexedFile) {
+            lastSearchResults = lastSearchResults.map { result ->
+                if (result.file.path == oldPath) result.copy(file = updated) else result
+            }
+            resultsAdapter.submitList(lastSearchResults)
+        }
+
+        override fun onFileRemoved(path: String) {
+            lastSearchResults = lastSearchResults.filter { it.file.path != path }
+            resultsAdapter.submitList(lastSearchResults)
+            if (lastSearchResults.isEmpty()) {
+                homeBinding.llResultsEmpty.visibility = View.VISIBLE
+            }
+            homeBinding.tvResultsCount.text =
+                RuUi.formatResultsCountHeader(this@MainActivity, lastSearchResults.size)
+        }
+
+        override fun toast(message: String) {
+            showToast(message)
+        }
+    }
     private var onboardingIsFirstRun = false
+    private enum class OnboardingStep { NAME, INDEX }
+    private enum class StoragePermissionSource { ONBOARDING, INDEX_TAB }
+    private var onboardingStep = OnboardingStep.NAME
+    private var pendingPermissionSource: StoragePermissionSource? = null
+    private var onboardingIndexStarted = false
+    private var onboardingPermissionDenied = false
     private var navHiddenForResults = false
     /** User explicitly left the search field (opened a file, etc.). Layout blur must not clear this. */
     private var userDismissedSearchFocus = false
@@ -115,10 +165,16 @@ class MainActivity : AppCompatActivity() {
     private var toastHideRunnable: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
+        splashScreen.setKeepOnScreenCondition { keepSplashScreen }
+
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         app = application as StriderApp
+
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        setupWindowInsets()
 
         PDFBoxResourceLoader.init(applicationContext)
 
@@ -126,31 +182,42 @@ class MainActivity : AppCompatActivity() {
         voiceSearchManager = VoiceSearchManager(applicationContext, voiceSearchCallbacks)
 
         inflateScreens()
-        applyShellWordmarks()
         setupNavBar()
         setupHomeScreen()
         setupIndexScreen()
         setupAnalyticsScreen()
         setupSettingsScreen()
         setupOnboardingOverlay()
+        setupModelLoadingOverlay()
         val restored = restoreLastScreen()
         showScreen(restored)
         attachToApp()
         observeIndexingWork()
         syncHomeDecorAnimations()
 
-        if (!UserProfile.isNameSet(this)) {
-            showOnboardingOverlay(isFirstRun = true)
+        if (shouldShowModelLoading()) {
+            showModelLoadingOverlay()
+        } else {
+            releaseSplashScreen()
+            maybeShowFirstRunOnboarding()
         }
 
         onBackPressedDispatcher.addCallback(this) {
+            if (modelLoadingVisible) {
+                return@addCallback
+            }
             if (::homeResultsUi.isInitialized && homeResultsUi.isResultsMode()) {
                 val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
                 if (homeBinding.etSearch.hasFocus()) {
                     imm.hideSoftInputFromWindow(homeBinding.etSearch.windowToken, 0)
                     homeBinding.etSearch.clearFocus()
+                } else {
+                    resetSearchUi(animated = true)
                 }
             } else if (binding.onboardingOverlay.visibility == View.VISIBLE) {
+                if (onboardingIsFirstRun) {
+                    return@addCallback
+                }
                 hideOnboardingOverlay()
             } else {
                 isEnabled = false
@@ -170,19 +237,8 @@ class MainActivity : AppCompatActivity() {
         settingsBinding = FragmentSettingsBinding.inflate(layoutInflater)
     }
 
-    private fun applyShellWordmarks() {
-        RuUi.applyWordmark(homeBinding.tvHomeWordmark)
-        RuUi.applyWordmark(homeBinding.tvResultsWordmark, R.dimen.results_wordmark_size)
-        RuUi.applyWordmark(indexBinding.tvIndexWordmark)
-        RuUi.applyWordmark(binding.tvOnboardingWordmark, R.dimen.onboarding_wordmark_size)
-        homeBinding.tvTaglineHi.alpha = 1f
-        homeBinding.tvTaglineEn.alpha = 0f
-        homeBinding.tvSearchHintIdle.alpha = 1f
-        homeBinding.tvSearchHintLive.alpha = 0f
-    }
-
     private fun restoreLastScreen(): Screen {
-        if (!UserProfile.isNameSet(this)) return Screen.HOME
+        if (UserProfile.shouldShowFirstRunOnboarding(this)) return Screen.HOME
         val name = prefs.getString(PREF_LAST_TAB, Screen.HOME.name) ?: Screen.HOME.name
         val screen = runCatching { Screen.valueOf(name) }.getOrDefault(Screen.HOME)
         if (screen == Screen.ANALYTICS && !EvalLogger.enabled) return Screen.HOME
@@ -214,7 +270,10 @@ class MainActivity : AppCompatActivity() {
         updateNavBar(screen)
         persistLastScreen(screen)
         if (screen == Screen.HOME) syncNavForHomeResults()
-        if (screen == Screen.SETTINGS) refreshSettingsSystemStatus()
+        if (screen == Screen.SETTINGS) {
+            refreshSettingsTogglesFromPrefs()
+            refreshSettingsSystemStatus()
+        }
         syncHomeDecorAnimations()
     }
 
@@ -233,35 +292,78 @@ class MainActivity : AppCompatActivity() {
     private fun setupNavBar() {
         if (EvalLogger.enabled) {
             binding.navAnalytics.visibility = View.VISIBLE
-            binding.navAnalytics.setOnClickListener { showScreen(Screen.ANALYTICS) }
+            binding.navAnalytics.setOnClickListener {
+                RuUi.performTapHaptic(it)
+                showScreen(Screen.ANALYTICS)
+            }
         }
-        binding.navHome.setOnClickListener     { showScreen(Screen.HOME) }
-        binding.navIndex.setOnClickListener    { showScreen(Screen.INDEX) }
-        binding.navSettings.setOnClickListener { showScreen(Screen.SETTINGS) }
+        binding.navHome.setOnClickListener {
+            RuUi.performTapHaptic(it)
+            showScreen(Screen.HOME)
+        }
+        binding.navIndex.setOnClickListener {
+            RuUi.performTapHaptic(it)
+            showScreen(Screen.INDEX)
+        }
+        binding.navSettings.setOnClickListener {
+            RuUi.performTapHaptic(it)
+            showScreen(Screen.SETTINGS)
+        }
     }
 
-    private fun updateNavBar(screen: Screen) {
-        val tabs = buildList {
-            add(Triple(binding.navHomeIcon, binding.navHomeLabel, screen == Screen.HOME))
-            add(Triple(binding.navIndexIcon, binding.navIndexLabel, screen == Screen.INDEX))
-            if (EvalLogger.enabled) {
-                add(Triple(binding.navAnalyticsIcon, binding.navAnalyticsLabel, screen == Screen.ANALYTICS))
-            }
-            add(Triple(binding.navSettingsIcon, binding.navSettingsLabel, screen == Screen.SETTINGS))
+    private fun setupWindowInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            systemBarTop = bars.top
+            systemBarBottom = bars.bottom
+            applyWindowInsetsPadding()
+            insets
         }
-        tabs.forEach { (icon, label, active) ->
-            icon.isSelected = active
-            label.isSelected = active
+        ViewCompat.requestApplyInsets(binding.root)
+    }
+
+    private fun applyWindowInsetsPadding() {
+        binding.modelLoadingOverlay.setPadding(0, systemBarTop, 0, systemBarBottom)
+        binding.splashOverlay.setPadding(0, systemBarTop, 0, systemBarBottom)
+        binding.onboardingOverlay.setPadding(0, systemBarTop, 0, systemBarBottom)
+        val navSide = binding.llNavBar.paddingStart
+        val navExtraBottom = resources.getDimensionPixelSize(R.dimen.ru_nav_bar_inset_bottom)
+        binding.llNavBar.setPadding(navSide, binding.llNavBar.paddingTop, navSide, systemBarBottom + navExtraBottom)
+        updateContentBottomInset(showNav = currentScreen != Screen.HOME || !navHiddenForResults)
+        // flContent already applies systemBarTop; child screens only need their layout breathing room.
+        if (::homeBinding.isInitialized) {
+            val hPad = resources.getDimensionPixelSize(R.dimen.ru_content_padding_h_settings)
+            homeBinding.themeToggleWrap.setPadding(hPad, 12.dp(), hPad, 0)
+            homeBinding.llResultsTop.setPadding(20.dp(), 8.dp(), 20.dp(), 0)
+        }
+    }
+
+    private fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
+
+    private fun updateNavBar(screen: Screen) {
+        data class Tab(val container: View, val icon: View, val label: View, val active: Boolean, val selectedRes: Int, val defaultRes: Int)
+        val tabs = buildList {
+            add(Tab(binding.navHome, binding.navHomeIcon, binding.navHomeLabel, screen == Screen.HOME, R.string.nav_home_selected, R.string.nav_home))
+            add(Tab(binding.navIndex, binding.navIndexIcon, binding.navIndexLabel, screen == Screen.INDEX, R.string.nav_index_selected, R.string.nav_index))
+            if (EvalLogger.enabled) {
+                add(Tab(binding.navAnalytics, binding.navAnalyticsIcon, binding.navAnalyticsLabel, screen == Screen.ANALYTICS, R.string.nav_analytics_selected, R.string.nav_analytics))
+            }
+            add(Tab(binding.navSettings, binding.navSettingsIcon, binding.navSettingsLabel, screen == Screen.SETTINGS, R.string.nav_settings_selected, R.string.nav_settings))
+        }
+        tabs.forEach { tab ->
+            tab.icon.isSelected = tab.active
+            tab.label.isSelected = tab.active
+            tab.container.contentDescription = getString(if (tab.active) tab.selectedRes else tab.defaultRes)
         }
     }
 
     private fun updateContentBottomInset(showNav: Boolean) {
         val bottom = if (showNav) {
-            resources.getDimensionPixelSize(R.dimen.ru_nav_clearance)
+            resources.getDimensionPixelSize(R.dimen.ru_nav_clearance) + systemBarBottom
         } else {
-            0
+            systemBarBottom
         }
-        binding.flContent.setPadding(0, 0, 0, bottom)
+        binding.flContent.setPadding(0, systemBarTop, 0, bottom)
     }
 
     private fun setNavHiddenForResults(hide: Boolean, animated: Boolean) {
@@ -363,6 +465,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupHomeScreen() {
+        homeBinding.tvTaglineHi.alpha = 1f
+        homeBinding.tvTaglineEn.alpha = 0f
+        homeBinding.tvSearchHintIdle.alpha = 1f
+        homeBinding.tvSearchHintLive.alpha = 0f
         skeletonAdapter = SkeletonResultsAdapter()
         setupThemeToggle()
         homeResultsUi = HomeResultsUi(
@@ -378,28 +484,40 @@ class MainActivity : AppCompatActivity() {
                 homeBinding.etSearch.setText("")
                 resetSearchUi(animated = true)
             },
+            onGoToIndex = { showScreen(Screen.INDEX) },
         ).also { it.setup() }
 
-        resultsAdapter = ResultsAdapter { result ->
-            if (pendingShareResults != null) {
-                val idx = pendingShareResults!!.indexOfFirst { it.file.path == result.file.path }
-                if (idx >= 0) {
-                    pendingShareIndex = idx
-                    updateSharePickerUi()
+        resultsAdapter = ResultsAdapter(
+            onItemClick = { result ->
+                if (pendingShareResults != null) {
+                    val idx = pendingShareResults!!.indexOfFirst { it.file.path == result.file.path }
+                    if (idx >= 0) {
+                        pendingShareIndex = idx
+                        updateSharePickerUi()
+                    }
+                } else {
+                    val rank = lastSearchResults.indexOfFirst { it.file.path == result.file.path } + 1
+                    if (EvalLogger.enabled && rank > 0) {
+                        EvalLogger.logResultClick(
+                            query = homeBinding.etSearch.text.toString().trim(),
+                            clickedRank = rank,
+                            clickedPath = result.file.path,
+                            top1Path = lastSearchResults.firstOrNull()?.file?.path
+                        )
+                    }
+                    openFile(result.file)
                 }
-            } else {
-                val rank = lastSearchResults.indexOfFirst { it.file.path == result.file.path } + 1
-                if (EvalLogger.enabled && rank > 0) {
-                    EvalLogger.logResultClick(
-                        query = homeBinding.etSearch.text.toString().trim(),
-                        clickedRank = rank,
-                        clickedPath = result.file.path,
-                        top1Path = lastSearchResults.firstOrNull()?.file?.path
-                    )
-                }
-                openFile(result.file)
-            }
-        }
+            },
+            onMoreClick = { result, anchor ->
+                if (pendingShareResults != null) return@ResultsAdapter
+                ResultFileActions.showMenu(
+                    context = this,
+                    anchor = anchor,
+                    file = result.file,
+                    callbacks = resultFileActionCallbacks,
+                )
+            },
+        )
         homeBinding.rvResults.apply {
             adapter = resultsAdapter
             layoutManager = LinearLayoutManager(this@MainActivity)
@@ -442,7 +560,7 @@ class MainActivity : AppCompatActivity() {
                             searchJob?.cancel()
                             dismissSharePicker()
                             resultsAdapter.submitList(emptyList())
-                            homeBinding.tvResultsEmpty.visibility = View.GONE
+                            homeBinding.llResultsEmpty.visibility = View.GONE
                             homeBinding.tvStatus.visibility = View.GONE
                             homeBinding.tvResultsCount.text = getString(R.string.results_keep_typing)
                             return
@@ -479,6 +597,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         homeBinding.btnMic.setOnClickListener {
+            RuUi.performTapHaptic(it)
             handleMicClick()
         }
 
@@ -489,6 +608,9 @@ class MainActivity : AppCompatActivity() {
         homeBinding.btnShareNext.setOnClickListener { advanceShareSelection() }
         homeBinding.btnShareConfirm.setOnClickListener { shareCurrentSelection() }
         homeBinding.btnShareCancel.setOnClickListener { dismissSharePicker() }
+
+        homeLogoSpinner = HomeLogoSpinner(homeBinding.ivHomeWordmark).also { it.attach() }
+
         syncSearchActionButton()
     }
 
@@ -523,8 +645,8 @@ class MainActivity : AppCompatActivity() {
     private fun restoreSearchFocus() {
         if (userDismissedSearchFocus || currentScreen != Screen.HOME) return
         searchFocusHandler.post {
-            searchFocusHandler.post {
-                if (userDismissedSearchFocus || currentScreen != Screen.HOME) return@post
+            searchFocusHandler.post inner@{
+                if (userDismissedSearchFocus || currentScreen != Screen.HOME) return@inner
                 val len = homeBinding.etSearch.text?.length ?: 0
                 homeBinding.etSearch.requestFocus()
                 homeBinding.etSearch.setSelection(len)
@@ -567,8 +689,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupIndexScreen() {
         indexBinding.btnIndex.setOnClickListener {
+            RuUi.performTapHaptic(it)
             if (!isEngineReady) { showToast(getString(R.string.status_loading)); return@setOnClickListener }
             if (isIndexing) return@setOnClickListener
+            indexFailed = false
             checkPermissionsAndIndex()
         }
         refreshIndexIdleState()
@@ -631,6 +755,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSettingsScreen() {
         refreshYourNameRow()
+        assignSettingsSwitchIds()
 
         settingsBinding.rowYourName.apply {
             tvRowTitle.text = getString(R.string.settings_your_name)
@@ -646,11 +771,9 @@ class MainActivity : AppCompatActivity() {
             ivRowIcon.setImageResource(R.drawable.ic_sparkle)
             switchRow.visibility = View.VISIBLE
             ivChevron.visibility = View.GONE
-            switchRow.isChecked = prefs.getBoolean(PREF_SEMANTIC_RERANK, true)
-            switchRow.setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean(PREF_SEMANTIC_RERANK, isChecked).apply()
-                if (!isChecked) showToast(getString(R.string.toast_semantic_off))
-            }
+            disableRowClickThrough(root)
+            switchRow.contentDescription = getString(R.string.settings_semantic)
+            wireSemanticSwitch(switchRow)
         }
         settingsBinding.rowVoice.apply {
             tvRowTitle.text = getString(R.string.settings_voice)
@@ -658,24 +781,18 @@ class MainActivity : AppCompatActivity() {
             ivRowIcon.setImageResource(R.drawable.ic_mic)
             switchRow.visibility = View.VISIBLE
             ivChevron.visibility = View.GONE
-            switchRow.isChecked = isVoiceSearchEnabled()
-            switchRow.setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean(PREF_VOICE_SEARCH_ENABLED, isChecked).apply()
-                if (!isChecked && voiceSearchManager.isListening) {
-                    voiceCancelRequested = true
-                    voiceSearchManager.stopListening()
-                    resetListeningUi()
-                }
-                if (!isChecked) showToast(getString(R.string.toast_voice_off))
-            }
+            disableRowClickThrough(root)
+            switchRow.contentDescription = getString(R.string.settings_voice)
+            wireVoiceSwitch(switchRow)
         }
         settingsBinding.rowMultilingual.apply {
             tvRowTitle.text = getString(R.string.settings_multilingual)
             tvRowSub.text = getString(R.string.settings_multilingual_sub)
             ivRowIcon.setImageResource(R.drawable.ic_globe)
-            switchRow.visibility = View.VISIBLE
+            switchRow.visibility = View.GONE
             ivChevron.visibility = View.GONE
-            switchRow.isChecked = true
+            root.isClickable = false
+            root.isFocusable = false
         }
         settingsBinding.rowContent.apply {
             tvRowTitle.text = getString(R.string.settings_content)
@@ -683,43 +800,51 @@ class MainActivity : AppCompatActivity() {
             ivRowIcon.setImageResource(R.drawable.ic_file)
             switchRow.visibility = View.VISIBLE
             ivChevron.visibility = View.GONE
-            switchRow.isChecked = prefs.getBoolean(PREF_SCAN_DOCUMENT_TEXT, true)
-            switchRow.setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean(PREF_SCAN_DOCUMENT_TEXT, isChecked).apply()
-            }
+            disableRowClickThrough(root)
+            switchRow.contentDescription = getString(R.string.settings_content)
+            wireContentScanSwitch(switchRow)
         }
         settingsBinding.rowAutoReindex.apply {
             tvRowTitle.text = getString(R.string.settings_auto_reindex)
             tvRowSub.text = getString(R.string.settings_auto_reindex_sub)
             ivRowIcon.setImageResource(R.drawable.ic_refresh)
+            ivRowIcon.clearColorFilter()
             switchRow.visibility = View.VISIBLE
             ivChevron.visibility = View.GONE
-            switchRow.isChecked = prefs.getBoolean(PREF_AUTO_REINDEX, true)
-            switchRow.setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean(PREF_AUTO_REINDEX, isChecked).apply()
-                app.schedulePeriodicIndexing(isChecked)
-            }
+            disableRowClickThrough(root)
+            switchRow.contentDescription = getString(R.string.settings_auto_reindex)
+            wireAutoReindexSwitch(switchRow)
         }
         settingsBinding.rowSetupStatus.apply {
             tvRowTitle.text = getString(R.string.settings_setup_status)
-            ivRowIcon.setImageResource(R.drawable.ic_refresh)
+            ivRowIcon.setImageResource(R.drawable.ic_info)
+            ivRowIcon.clearColorFilter()
+            llIconWrap.visibility = View.VISIBLE
             switchRow.visibility = View.GONE
             ivChevron.visibility = View.GONE
+            root.isClickable = false
         }
+        refreshSettingsTogglesFromPrefs()
         refreshSettingsSystemStatus()
         settingsBinding.rowVersion.apply {
-            tvRowTitle.text = getString(R.string.settings_version)
+            tvRowTitle.text = getString(R.string.settings_version, BuildConfig.VERSION_NAME)
             tvRowSub.visibility = View.GONE
             llIconWrap.visibility = View.GONE
             switchRow.visibility = View.GONE
             ivChevron.visibility = View.GONE
         }
-        settingsBinding.rowModel.apply {
-            tvRowTitle.text = getString(R.string.settings_model)
-            tvRowSub.text = getString(R.string.settings_model_val)
-            llIconWrap.visibility = View.GONE
+        settingsBinding.rowOpenSource.apply {
+            tvRowTitle.text = getString(R.string.settings_open_source)
+            tvRowSub.text = getString(R.string.settings_open_source_sub)
+            ivRowIcon.setImageResource(R.drawable.ic_shield)
+            ivRowIcon.clearColorFilter()
+            llIconWrap.visibility = View.VISIBLE
             switchRow.visibility = View.GONE
-            ivChevron.visibility = View.GONE
+            ivChevron.visibility = View.VISIBLE
+            root.setOnClickListener {
+                RuUi.performTapHaptic(it)
+                showOpenSourceNotice()
+            }
         }
         settingsBinding.rowClear.apply {
             tvRowTitle.text = getString(R.string.settings_clear)
@@ -729,8 +854,44 @@ class MainActivity : AppCompatActivity() {
             ivRowIcon.setColorFilter(getColor(R.color.ru_crimson))
             switchRow.visibility = View.GONE
             ivChevron.visibility = View.VISIBLE
-            root.setOnClickListener { clearIndex() }
+            root.setOnClickListener {
+                RuUi.performTapHaptic(it)
+                confirmClearIndex()
+            }
         }
+    }
+
+    private fun confirmClearIndex() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.clear_index_title)
+            .setMessage(R.string.clear_index_message)
+            .setNegativeButton(R.string.clear_index_cancel, null)
+            .setPositiveButton(R.string.clear_index_confirm) { _, _ -> clearIndex() }
+            .show()
+    }
+
+    private fun showOpenSourceNotice() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.open_source_notice_title)
+            .setMessage(R.string.open_source_notice_body)
+            .setPositiveButton(R.string.open_source_view_license) { _, _ ->
+                startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://www.apache.org/licenses/LICENSE-2.0")
+                    )
+                )
+            }
+            .setNeutralButton(R.string.open_source_view_model) { _, _ ->
+                startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://huggingface.co/ibm-granite/granite-embedding-97m-multilingual-r2")
+                    )
+                )
+            }
+            .setNegativeButton(android.R.string.ok, null)
+            .show()
     }
 
     // ─────────────────────────────────────────────
@@ -818,31 +979,155 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateInitUi(state: AppInitState) {
         refreshSettingsSystemStatus(state)
-        syncOnboardingSetupUi(state)
+        syncModelLoadingUi(state)
     }
 
-    private fun syncOnboardingSetupUi(state: AppInitState) {
-        if (!::binding.isInitialized) return
-        val showSetup = app.isModelSetupInProgress &&
-            !state.isComplete &&
-            (binding.onboardingOverlay.visibility == View.VISIBLE || state.progress == -1)
-        binding.llOnboardingSetup.visibility = if (showSetup) View.VISIBLE else View.GONE
-        if (!showSetup) {
-            binding.btnOnboardingSetupRetry.visibility = View.GONE
-            return
+    private fun shouldShowModelLoading(): Boolean {
+        if (app.isEngineReady) return false
+        if (app.currentInitStateOrReady().isComplete) return false
+        // Keep full-screen loader through first complete setup (protects onboarding timing).
+        if (!prefs.getBoolean(StriderApp.PREF_SETUP_COMPLETE, false)) return true
+        // Return visits: block only during an actual model re-download.
+        return app.currentInitStateOrReady().phase == InitPhase.MODEL_DOWNLOAD
+    }
+
+    private fun setupModelLoadingOverlay() {
+        binding.btnModelLoadingRetry.setOnClickListener {
+            app.requestCellularDownloadConfirmation(this)
+            app.retryModelDelivery()
+            modelLoadingDismissPosted = false
+            binding.btnModelLoadingRetry.visibility = View.GONE
+            binding.tvModelLoadingPercent.text = "0%"
+            binding.modelLoadingProgressBar.progress = 0
         }
-        binding.tvOnboardingSetupMessage.text = when {
-            state.progress == -1 -> state.message.ifBlank { getString(R.string.onboarding_setup_failed) }
-            else -> state.message.ifBlank { getString(R.string.status_first_load) }
-        }
-        if (state.progress >= 0) {
-            binding.onboardingSetupProgressBar.progress = state.progress
-            binding.onboardingSetupProgressBar.visibility = View.VISIBLE
+        configureLoadingTitleForMotion()
+    }
+
+    private fun configureLoadingTitleForMotion() {
+        if (animatorDurationScale() <= 0f) {
+            binding.tvModelLoadingTitleHi.visibility = View.GONE
+            binding.tvModelLoadingTitleHi.alpha = 0f
+            binding.tvModelLoadingTitleEn.visibility = View.VISIBLE
+            binding.tvModelLoadingTitleEn.alpha = 1f
         } else {
-            binding.onboardingSetupProgressBar.visibility = View.INVISIBLE
+            binding.tvModelLoadingTitleHi.visibility = View.VISIBLE
+            binding.tvModelLoadingTitleHi.alpha = 1f
+            binding.tvModelLoadingTitleEn.alpha = 0f
         }
-        binding.btnOnboardingSetupRetry.visibility =
-            if (state.progress == -1) View.VISIBLE else View.GONE
+    }
+
+    private fun showModelLoadingOverlay() {
+        modelLoadingVisible = true
+        modelLoadingDismissPosted = false
+        binding.modelLoadingOverlay.visibility = View.VISIBLE
+        binding.llNavBar.visibility = View.GONE
+        releaseSplashScreen()
+        startLoadingTitleCycle()
+        syncModelLoadingUi(app.currentInitStateOrReady())
+    }
+
+    private fun hideModelLoadingOverlay() {
+        modelLoadingVisible = false
+        stopLoadingTitleCycle()
+        binding.modelLoadingOverlay.visibility = View.GONE
+        binding.llNavBar.visibility = View.VISIBLE
+        modelLoadingDismissPosted = false
+    }
+
+    private fun releaseSplashScreen() {
+        keepSplashScreen = false
+        if (::binding.isInitialized) {
+            binding.splashOverlay.visibility = View.GONE
+        }
+    }
+
+    private fun maybeShowFirstRunOnboarding() {
+        if (UserProfile.shouldShowFirstRunOnboarding(this)) {
+            showOnboardingOverlay(isFirstRun = true)
+        }
+    }
+
+    private fun indexDoneHintText(): String {
+        val ts = prefs.getLong(PREF_LAST_INDEX_COMPLETED_AT, 0L)
+        return when {
+            ts > 0L -> getString(
+                R.string.index_hint_done_relative,
+                RuUi.formatRelativeIndexTime(this, ts)
+            )
+            ::indexer.isInitialized && indexer.size > 0 -> getString(R.string.index_hint_done)
+            else -> getString(R.string.index_hint_done_never)
+        }
+    }
+
+    private fun updateIndexDialAccessibility(progressPercent: Int) {
+        indexBinding.indexDial.contentDescription =
+            getString(R.string.a11y_index_progress, progressPercent.coerceIn(0, 100))
+    }
+
+    private fun syncModelLoadingUi(state: AppInitState) {
+        if (!::binding.isInitialized) return
+        if (!modelLoadingVisible && shouldShowModelLoading()) {
+            showModelLoadingOverlay()
+        }
+        if (!modelLoadingVisible) return
+
+        val failed = state.progress == -1 && state.message.isNotBlank()
+        binding.btnModelLoadingRetry.visibility = if (failed) View.VISIBLE else View.GONE
+
+        if (state.progress >= 0) {
+            binding.modelLoadingProgressBar.progress = state.progress
+            binding.modelLoadingProgressBar.visibility = View.VISIBLE
+            binding.tvModelLoadingPercent.text = getString(R.string.model_loading_percent, state.progress)
+        } else if (failed) {
+            binding.modelLoadingProgressBar.visibility = View.INVISIBLE
+            binding.tvModelLoadingPercent.text = state.message
+        } else {
+            binding.modelLoadingProgressBar.progress = 0
+            binding.modelLoadingProgressBar.visibility = View.VISIBLE
+            binding.tvModelLoadingPercent.text = getString(R.string.model_loading_percent, 0)
+        }
+
+        if (state.isComplete && !modelLoadingDismissPosted) {
+            binding.modelLoadingProgressBar.progress = 100
+            binding.tvModelLoadingPercent.text = getString(R.string.model_loading_ready)
+            modelLoadingDismissPosted = true
+            val holdMs = uiAnimDuration(900L).coerceAtLeast(0L)
+            loadingTitleHandler.postDelayed({
+                hideModelLoadingOverlay()
+                maybeShowFirstRunOnboarding()
+            }, holdMs)
+        }
+    }
+
+    private fun startLoadingTitleCycle() {
+        if (animatorDurationScale() <= 0f) return
+        if (loadingTitleCycleActive) return
+        loadingTitleCycleActive = true
+        loadingTitleCycleRunnable?.let { loadingTitleHandler.removeCallbacks(it) }
+        val runnable = object : Runnable {
+            override fun run() {
+                if (!loadingTitleCycleActive || !modelLoadingVisible) return
+                val fadeMs = uiAnimDuration(600L)
+                val cur = if (loadingTitleToggle) binding.tvModelLoadingTitleHi else binding.tvModelLoadingTitleEn
+                val next = if (loadingTitleToggle) binding.tvModelLoadingTitleEn else binding.tvModelLoadingTitleHi
+                cur.animate().alpha(0f).setDuration(fadeMs).withEndAction {
+                    if (!loadingTitleCycleActive) return@withEndAction
+                    next.animate().alpha(1f).setDuration(fadeMs).start()
+                }.start()
+                loadingTitleToggle = !loadingTitleToggle
+                if (loadingTitleCycleActive) loadingTitleHandler.postDelayed(this, 4200)
+            }
+        }
+        loadingTitleCycleRunnable = runnable
+        loadingTitleHandler.postDelayed(runnable, 4200)
+    }
+
+    private fun stopLoadingTitleCycle() {
+        loadingTitleCycleActive = false
+        loadingTitleCycleRunnable?.let { loadingTitleHandler.removeCallbacks(it) }
+        loadingTitleCycleRunnable = null
+        binding.tvModelLoadingTitleHi.animate().cancel()
+        binding.tvModelLoadingTitleEn.animate().cancel()
     }
 
     private fun onEngineReady(readyApp: StriderApp) {
@@ -854,9 +1139,15 @@ class MainActivity : AppCompatActivity() {
         homeBinding.btnSearch.isEnabled = true
         syncSearchActionButton()
         refreshSettingsSystemStatus()
+        if (currentScreen == Screen.SETTINGS) {
+            refreshSettingsTogglesFromPrefs()
+        }
 
         if (prefs.getBoolean(PREF_AUTO_REINDEX, true)) {
             app.schedulePeriodicIndexing(true)
+        }
+        if (StorageAccess.canIndexStorage(this)) {
+            app.consumePendingForceReindexIfNeeded()
         }
     }
 
@@ -870,7 +1161,7 @@ class MainActivity : AppCompatActivity() {
             updateIndexDialCount(existingCount)
             indexBinding.btnIndex.text = getString(R.string.btn_reindex)
             setIndexPhaseDone(existingCount)
-            indexBinding.tvIndexHint.text = getString(R.string.index_hint_done)
+            indexBinding.tvIndexHint.text = indexDoneHintText()
             showBucketPills()
         } else if (isEngineReady) {
             refreshIndexIdleState()
@@ -884,8 +1175,18 @@ class MainActivity : AppCompatActivity() {
         val subtitle = when {
             initState.isComplete -> {
                 val count = if (::indexer.isInitialized) indexer.size else 0
-                if (count > 0) getString(R.string.settings_status_ready_indexed, count)
+                val base = if (count > 0) getString(R.string.settings_status_ready_indexed, count)
                 else getString(R.string.settings_status_ready)
+                if (isEngineReady && EvalLogger.enabled) {
+                    val modelFile = java.io.File(
+                        applicationContext.filesDir,
+                        EmbeddingBackendSelector.MODEL_INT8
+                    )
+                    val backend = app.engine.currentBackend.label
+                    val cache = if (::db.isInitialized && db.isEmbeddingCacheWarm()) "warm" else "cold"
+                    val sizeMb = modelFile.length() / (1024 * 1024)
+                    "$base · $backend · ${sizeMb}MB · cache $cache"
+                } else base
             }
             initState.progress == -1 -> initState.message.ifBlank { getString(R.string.onboarding_setup_failed) }
             initState.progress >= 0 ->
@@ -896,6 +1197,89 @@ class MainActivity : AppCompatActivity() {
         settingsBinding.rowSetupStatus.tvRowSub.visibility = View.VISIBLE
     }
 
+    /** Stable ids so activity recreate does not cross-wire saved switch state. */
+    private fun assignSettingsSwitchIds() {
+        if (!::settingsBinding.isInitialized) return
+        settingsBinding.rowSemantic.switchRow.id = R.id.settings_switch_semantic
+        settingsBinding.rowVoice.switchRow.id = R.id.settings_switch_voice
+        settingsBinding.rowMultilingual.switchRow.id = R.id.settings_switch_multilingual
+        settingsBinding.rowContent.switchRow.id = R.id.settings_switch_content
+        settingsBinding.rowAutoReindex.switchRow.id = R.id.settings_switch_auto_reindex
+    }
+
+    private fun disableRowClickThrough(rowRoot: View) {
+        rowRoot.isClickable = false
+        rowRoot.isFocusable = false
+    }
+
+    private fun SwitchMaterial.setCheckedSilently(checked: Boolean) {
+        if (isChecked == checked) return
+        val listener = tag as? CompoundButton.OnCheckedChangeListener
+        setOnCheckedChangeListener(null)
+        isChecked = checked
+        setOnCheckedChangeListener(listener)
+    }
+
+    private fun SwitchMaterial.rememberListener(listener: CompoundButton.OnCheckedChangeListener) {
+        tag = listener
+        setOnCheckedChangeListener(listener)
+    }
+
+    private fun saveSettingsToggle(key: String, value: Boolean) {
+        prefs.edit().putBoolean(key, value).commit()
+    }
+
+    private fun refreshSettingsTogglesFromPrefs() {
+        if (!::settingsBinding.isInitialized) return
+        settingsBinding.rowSemantic.switchRow.setCheckedSilently(
+            prefs.getBoolean(PREF_SEMANTIC_RERANK, true)
+        )
+        settingsBinding.rowVoice.switchRow.setCheckedSilently(isVoiceSearchEnabled())
+        settingsBinding.rowMultilingual.switchRow.setCheckedSilently(true)
+        settingsBinding.rowContent.switchRow.setCheckedSilently(
+            prefs.getBoolean(PREF_SCAN_DOCUMENT_TEXT, true)
+        )
+        settingsBinding.rowAutoReindex.switchRow.setCheckedSilently(
+            prefs.getBoolean(PREF_AUTO_REINDEX, true)
+        )
+    }
+
+    private fun wireSemanticSwitch(switch: SwitchMaterial) {
+        switch.rememberListener { view, isChecked ->
+            RuUi.performTapHaptic(view)
+            saveSettingsToggle(PREF_SEMANTIC_RERANK, isChecked)
+            if (!isChecked) showToast(getString(R.string.toast_semantic_off))
+        }
+    }
+
+    private fun wireVoiceSwitch(switch: SwitchMaterial) {
+        switch.rememberListener { view, isChecked ->
+            RuUi.performTapHaptic(view)
+            saveSettingsToggle(PREF_VOICE_SEARCH_ENABLED, isChecked)
+            if (!isChecked && ::voiceSearchManager.isInitialized && voiceSearchManager.isListening) {
+                voiceCancelRequested = true
+                voiceSearchManager.stopListening()
+                resetListeningUi()
+            }
+            if (!isChecked) showToast(getString(R.string.toast_voice_off))
+        }
+    }
+
+    private fun wireContentScanSwitch(switch: SwitchMaterial) {
+        switch.rememberListener { view, isChecked ->
+            RuUi.performTapHaptic(view)
+            saveSettingsToggle(PREF_SCAN_DOCUMENT_TEXT, isChecked)
+        }
+    }
+
+    private fun wireAutoReindexSwitch(switch: SwitchMaterial) {
+        switch.rememberListener { view, isChecked ->
+            RuUi.performTapHaptic(view)
+            saveSettingsToggle(PREF_AUTO_REINDEX, isChecked)
+            app.schedulePeriodicIndexing(isChecked)
+        }
+    }
+
     private fun setupOnboardingOverlay() {
         binding.btnOnboardingSave.setOnClickListener {
             val name = binding.etOnboardingName.text.toString().trim()
@@ -904,39 +1288,137 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             saveUserName(name)
-            hideOnboardingOverlay()
+            if (onboardingIsFirstRun) {
+                showOnboardingIndexStep()
+            } else {
+                hideOnboardingOverlay()
+            }
         }
 
         binding.btnOnboardingSkip.setOnClickListener {
-            hideOnboardingOverlay()
+            if (onboardingIsFirstRun) {
+                showOnboardingIndexStep()
+            }
         }
 
-        binding.btnOnboardingSetupRetry.setOnClickListener {
-            app.requestCellularDownloadConfirmation(this)
-            app.retryModelDelivery()
+        binding.btnOnboardingGrantStart.setOnClickListener {
+            RuUi.performTapHaptic(it)
+            requestStorageForIndexing(StoragePermissionSource.ONBOARDING)
+        }
+
+        binding.btnOnboardingContinue.setOnClickListener {
+            RuUi.performTapHaptic(it)
+            if (!onboardingIndexStarted && !isIndexing) return@setOnClickListener
+            completeFirstRunOnboarding()
+        }
+
+        binding.btnOnboardingPermTryAgain.setOnClickListener {
+            RuUi.performTapHaptic(it)
+            onboardingPermissionDenied = false
+            refreshOnboardingIndexUi()
+            requestStorageForIndexing(StoragePermissionSource.ONBOARDING)
+        }
+
+        binding.btnOnboardingPermSettings.setOnClickListener {
+            RuUi.performTapHaptic(it)
+            pendingPermissionSource = StoragePermissionSource.ONBOARDING
+            StoragePermissionFlow.openAppSettings(this)
         }
     }
 
     private fun showOnboardingOverlay(isFirstRun: Boolean) {
         onboardingIsFirstRun = isFirstRun
+        onboardingIndexStarted = false
+        onboardingPermissionDenied = false
+        pendingPermissionSource = null
         binding.etOnboardingName.setText(UserProfile.getDisplayName(this) ?: "")
         binding.btnOnboardingSkip.visibility = if (isFirstRun) View.VISIBLE else View.GONE
-        binding.tvOnboardingTitle.text = getString(R.string.onboarding_name_title)
-        binding.tvOnboardingSub.text = getString(R.string.onboarding_name_sub)
+
+        if (isFirstRun) {
+            binding.llNavBar.visibility = View.GONE
+            onboardingStep = if (UserProfile.isNameSet(this)) {
+                OnboardingStep.INDEX
+            } else {
+                OnboardingStep.NAME
+            }
+        } else {
+            onboardingStep = OnboardingStep.NAME
+        }
+
         binding.onboardingOverlay.visibility = View.VISIBLE
-        syncOnboardingSetupUi(app.currentInitStateOrReady())
         binding.onboardingOverlay.translationY = 12f * resources.displayMetrics.density
         binding.onboardingOverlay.animate().translationY(0f).setDuration(220).start()
-        binding.etOnboardingName.requestFocus()
+
+        if (isFirstRun && onboardingStep == OnboardingStep.INDEX) {
+            binding.onboardingStepName.visibility = View.GONE
+            binding.onboardingStepIndex.visibility = View.VISIBLE
+            refreshOnboardingIndexUi()
+        } else {
+            binding.onboardingStepName.visibility = View.VISIBLE
+            binding.onboardingStepIndex.visibility = View.GONE
+            binding.tvOnboardingTitle.text = getString(R.string.onboarding_name_title)
+            binding.tvOnboardingSub.text = getString(R.string.onboarding_name_sub)
+            binding.etOnboardingName.requestFocus()
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(binding.etOnboardingName, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun showOnboardingIndexStep() {
+        onboardingStep = OnboardingStep.INDEX
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.showSoftInput(binding.etOnboardingName, InputMethodManager.SHOW_IMPLICIT)
+        imm.hideSoftInputFromWindow(binding.etOnboardingName.windowToken, 0)
+        binding.onboardingStepName.visibility = View.GONE
+        binding.onboardingStepIndex.visibility = View.VISIBLE
+        refreshOnboardingIndexUi()
+    }
+
+    private fun refreshOnboardingIndexUi() {
+        if (onboardingStep != OnboardingStep.INDEX) return
+        val started = onboardingIndexStarted || isIndexing
+        if (started) {
+            binding.btnOnboardingGrantStart.visibility = View.GONE
+            binding.llOnboardingPermRecovery.visibility = View.GONE
+            binding.tvOnboardingPermDenied.visibility = View.GONE
+            binding.tvOnboardingIndexStarted.visibility = View.VISIBLE
+            binding.btnOnboardingContinue.visibility = View.VISIBLE
+            binding.btnOnboardingContinue.isEnabled = true
+            binding.btnOnboardingContinue.isClickable = true
+            binding.btnOnboardingContinue.isFocusable = true
+            binding.btnOnboardingContinue.alpha = 1f
+        } else {
+            binding.btnOnboardingContinue.visibility = View.GONE
+            binding.tvOnboardingIndexStarted.visibility = View.GONE
+            binding.btnOnboardingGrantStart.visibility = View.VISIBLE
+            binding.tvOnboardingPermDenied.visibility =
+                if (onboardingPermissionDenied) View.VISIBLE else View.GONE
+            binding.llOnboardingPermRecovery.visibility =
+                if (onboardingPermissionDenied) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun completeFirstRunOnboarding() {
+        UserProfile.markFirstRunSetupComplete(this)
+        hideOnboardingOverlay()
     }
 
     private fun hideOnboardingOverlay() {
         binding.onboardingOverlay.visibility = View.GONE
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(binding.etOnboardingName.windowToken, 0)
+        if (onboardingIsFirstRun) {
+            binding.llNavBar.visibility = View.VISIBLE
+        }
         onboardingIsFirstRun = false
+        onboardingStep = OnboardingStep.NAME
+        onboardingIndexStarted = false
+        onboardingPermissionDenied = false
+        pendingPermissionSource = null
+        binding.onboardingStepName.visibility = View.VISIBLE
+        binding.onboardingStepIndex.visibility = View.GONE
+        binding.btnOnboardingContinue.visibility = View.GONE
+        binding.btnOnboardingContinue.isEnabled = false
+        binding.btnOnboardingContinue.alpha = 0.45f
     }
 
     private fun refreshYourNameRow() {
@@ -986,10 +1468,18 @@ class MainActivity : AppCompatActivity() {
             WorkInfo.State.ENQUEUED,
             WorkInfo.State.BLOCKED -> {
                 isIndexing = true
+                if (onboardingIsFirstRun &&
+                    onboardingStep == OnboardingStep.INDEX &&
+                    binding.onboardingOverlay.visibility == View.VISIBLE
+                ) {
+                    onboardingIndexStarted = true
+                    refreshOnboardingIndexUi()
+                }
                 setIndexRunningUi(count, total, status, phase, info.state)
             }
             WorkInfo.State.SUCCEEDED -> {
                 isIndexing = false
+                indexFailed = false
                 stopDialSweepAnimation()
                 indexBinding.btnIndex.isEnabled = true
                 indexBinding.btnIndex.alpha = 1f
@@ -999,26 +1489,32 @@ class MainActivity : AppCompatActivity() {
                 if (isEngineReady) {
                     val size = indexer.size
                     updateIndexDialCount(size)
+                    indexBinding.tvDialLabel.text = getString(R.string.index_files_label)
                     indexBinding.indexDial.setProgress(1f)
+                    updateIndexDialAccessibility(100)
                     setIndexPhaseDone(size)
-                    indexBinding.tvIndexHint.text = getString(R.string.index_hint_done)
+                    indexBinding.tvIndexHint.text = indexDoneHintText()
                     showBucketPills()
                     refreshSettingsSystemStatus()
+                    prefs.edit().putLong(PREF_LAST_INDEX_COMPLETED_AT, System.currentTimeMillis()).apply()
                     showToast(getString(R.string.toast_index_complete, size))
+                    binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
                 }
             }
             WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> {
                 isIndexing = false
+                indexFailed = true
                 stopDialSweepAnimation()
                 indexBinding.btnIndex.isEnabled = true
                 indexBinding.btnIndex.alpha = 1f
+                indexBinding.btnIndex.text = getString(R.string.btn_retry)
                 indexBinding.progressScanBar.visibility = View.GONE
                 indexBinding.tvCurrentFile.visibility = View.GONE
                 refreshIndexIdleState()
-                status?.let {
-                    indexBinding.tvIndexPhase.text = it
-                    showStatus(it)
-                }
+                val failStatus = info.outputData.getString(IndexingWorker.KEY_STATUS) ?: status
+                indexBinding.tvIndexPhase.text = getString(R.string.index_phase_failed)
+                showToast(failStatus ?: getString(R.string.index_failed_toast))
+                failStatus?.let { showStatus(it) }
             }
             else -> { /* unused */ }
         }
@@ -1040,12 +1536,17 @@ class MainActivity : AppCompatActivity() {
         indexBinding.tvIndexHint.text = getString(R.string.index_hint_running)
 
         val msg = status ?: when (state) {
-            WorkInfo.State.BLOCKED -> "Waiting — turn off battery saver for indexing"
-            WorkInfo.State.ENQUEUED -> "Queued…"
-            else -> "Scanning storage…"
+            WorkInfo.State.BLOCKED -> getString(R.string.index_status_battery_saver)
+            WorkInfo.State.ENQUEUED -> getString(R.string.index_status_queued)
+            else -> getString(R.string.index_status_scanning)
         }
         indexBinding.tvCurrentFile.text = msg
         updateIndexDialCount(count)
+        indexBinding.tvDialLabel.text = if (phase == IndexingWorker.PHASE_SCANNING) {
+            getString(R.string.index_files_scanning_label)
+        } else {
+            getString(R.string.index_files_label)
+        }
         showStatus(msg)
 
         val bucket = extractBucketName(msg, phase)
@@ -1056,8 +1557,10 @@ class MainActivity : AppCompatActivity() {
             stopDialSweepAnimation()
             indexBinding.indexDial.setIndeterminate(false)
             indexBinding.indexDial.setProgress(count.toFloat() / total.toFloat())
+            updateIndexDialAccessibility((count * 100 / total).coerceIn(0, 100))
         } else {
             indexBinding.indexDial.setIndeterminate(true)
+            updateIndexDialAccessibility(0)
             startDialSweepAnimation()
         }
     }
@@ -1118,16 +1621,21 @@ class MainActivity : AppCompatActivity() {
     private fun refreshIndexIdleState() {
         val count = if (::indexer.isInitialized) indexer.size else 0
         updateIndexDialCount(count)
+        indexBinding.tvDialLabel.text = getString(R.string.index_files_label)
         indexBinding.indexDial.setIndeterminate(false)
         indexBinding.indexDial.setProgress(if (count > 0) 1f else 0f)
         indexBinding.btnIndex.isEnabled = true
         indexBinding.btnIndex.alpha = 1f
-        indexBinding.btnIndex.text = if (count > 0) getString(R.string.btn_reindex) else getString(R.string.btn_index)
+        indexBinding.btnIndex.text = when {
+            indexFailed -> getString(R.string.btn_retry)
+            count > 0 -> getString(R.string.btn_reindex)
+            else -> getString(R.string.btn_index)
+        }
         indexBinding.progressScanBar.visibility = View.GONE
         indexBinding.tvCurrentFile.visibility = View.GONE
         if (count > 0) {
             setIndexPhaseDone(count)
-            indexBinding.tvIndexHint.text = getString(R.string.index_hint_done)
+            indexBinding.tvIndexHint.text = indexDoneHintText()
             showBucketPills()
         } else {
             indexBinding.tvIndexPhase.text = getString(R.string.index_phase_idle)
@@ -1160,30 +1668,107 @@ class MainActivity : AppCompatActivity() {
     // ─────────────────────────────────────────────
 
     private fun checkPermissionsAndIndex() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (Environment.isExternalStorageManager()) startIndexing()
-            else startActivityForResult(
-                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                    data = Uri.parse("package:$packageName")
-                }, REQUEST_MANAGE_STORAGE
-            )
+        if (StoragePermissionFlow.hasAccess(this)) {
+            startIndexing()
+            return
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.onboarding_index_title)
+            .setMessage(storagePermissionRationaleMessage())
+            .setPositiveButton(R.string.onboarding_index_grant_start) { _, _ ->
+                requestStorageForIndexing(StoragePermissionSource.INDEX_TAB)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun storagePermissionRationaleMessage(): String =
+        getString(
+            R.string.onboarding_perm_rationale_dialog,
+            getString(R.string.onboarding_perm_what),
+            getString(R.string.onboarding_perm_why),
+            getString(R.string.onboarding_perm_privacy),
+        )
+
+    private fun requestStorageForIndexing(source: StoragePermissionSource) {
+        if (StoragePermissionFlow.hasAccess(this)) {
+            pendingPermissionSource = null
+            onboardingPermissionDenied = false
+            startIndexing(source)
+            return
+        }
+        pendingPermissionSource = source
+        StoragePermissionFlow.requestAccess(this)
+    }
+
+    private fun handleStoragePermissionResult() {
+        val source = pendingPermissionSource
+        pendingPermissionSource = null
+        if (StoragePermissionFlow.hasAccess(this)) {
+            onboardingPermissionDenied = false
+            startIndexing(source)
         } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                == PackageManager.PERMISSION_GRANTED) startIndexing()
-            else ActivityCompat.requestPermissions(
-                this, arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), REQUEST_READ_STORAGE
-            )
+            when (source) {
+                StoragePermissionSource.ONBOARDING -> {
+                    onboardingPermissionDenied = true
+                    refreshOnboardingIndexUi()
+                }
+                StoragePermissionSource.INDEX_TAB -> showStoragePermissionDeniedDialog()
+                null -> showToast(getString(R.string.permission_denied))
+            }
         }
     }
 
-    private fun startIndexing() {
-        if (!isEngineReady) {
-            showToast("Model still loading…")
-            return
+    private fun showStoragePermissionDeniedDialog() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.onboarding_perm_denied_title)
+            .setPositiveButton(R.string.onboarding_perm_try_again) { _, _ ->
+                requestStorageForIndexing(StoragePermissionSource.INDEX_TAB)
+            }
+            .setNegativeButton(R.string.onboarding_perm_open_settings) { _, _ ->
+                pendingPermissionSource = StoragePermissionSource.INDEX_TAB
+                StoragePermissionFlow.openAppSettings(this)
+            }
+            .show()
+    }
+
+    private var pendingIndexSource: StoragePermissionSource? = null
+
+    /** Enqueues indexing; returns false only when core subsystems are not ready yet. */
+    private fun startIndexing(source: StoragePermissionSource? = null): Boolean {
+        if (!isIndexReady || !::indexer.isInitialized) {
+            showToast(getString(R.string.status_loading))
+            return false
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingIndexSource = source
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                REQUEST_POST_NOTIFICATIONS
+            )
+            return true
+        }
+        return completeStartIndexing(source)
+    }
+
+    private fun completeStartIndexing(source: StoragePermissionSource?): Boolean {
         resultsAdapter.submitList(emptyList())
-        showStatus("Starting background index…")
-        app.enqueueIndexing(forceFull = false)
+        showStatus(getString(R.string.status_starting_index))
+        val forceFull = app.needsEmbeddingReindex() || app.hasPendingForceReindex()
+        if (app.hasPendingForceReindex()) app.clearPendingForceReindex()
+        if (!isEngineReady) {
+            showToast(getString(R.string.toast_index_waits_for_model))
+        }
+        app.enqueueIndexing(forceFull = forceFull)
+        if (source == StoragePermissionSource.ONBOARDING) {
+            onboardingIndexStarted = true
+            refreshOnboardingIndexUi()
+        }
+        return true
     }
 
     private fun showBucketPills() {
@@ -1267,6 +1852,9 @@ class MainActivity : AppCompatActivity() {
         cancelSearchDebounce()
         val rawQuery = homeBinding.etSearch.text.toString().trim()
         if (rawQuery.length < 2) {
+            if (rawQuery.isNotEmpty()) {
+                showStatus(getString(R.string.search_query_too_short))
+            }
             return
         }
         performSearch(trigger)
@@ -1310,9 +1898,10 @@ class MainActivity : AppCompatActivity() {
             showToast(getString(R.string.status_loading))
             return
         }
+        var useSemantic = semanticEnabled
         if (semanticEnabled && !isEngineReady) {
-            showToast(getString(R.string.status_loading))
-            return
+            useSemantic = false
+            showToast(getString(R.string.search_semantic_starting))
         }
 
         val isLiveRefine = trigger == "live_refine" &&
@@ -1333,11 +1922,11 @@ class MainActivity : AppCompatActivity() {
         searchJob = lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val enriched = enrichQuery(rawQuery, UserProfile.getNameTokens(this@MainActivity))
-                val useSemantic = semanticEnabled || enriched.actionIntent != null
+                val semanticForSearch = useSemantic || enriched.actionIntent != null
                 val outcome = indexer.searchWithDiagnostics(
                     enriched,
                     topK = 20,
-                    semanticEnabled = useSemantic,
+                    semanticEnabled = semanticForSearch,
                     trackHint = null
                 )
                 var results = outcome.results
@@ -1364,6 +1953,7 @@ class MainActivity : AppCompatActivity() {
                         results,
                         rawQuery,
                         resultsAdapter,
+                        indexedCount = indexedCount,
                         isRefine = isLiveRefine,
                         onListApplied = if (shareRefinePending) {
                             { refreshSharePickerResults(results, enriched.shareTarget) }
@@ -1398,8 +1988,19 @@ class MainActivity : AppCompatActivity() {
                     if (queryGeneration != searchGeneration) return@withContext
                     val currentQuery = homeBinding.etSearch.text.toString().trim()
                     if (currentQuery.length < 2 || currentQuery != rawQuery) return@withContext
-                    showStatus("Search error: ${e.message}")
-                    homeResultsUi.onSearchFinished(emptyList(), rawQuery, resultsAdapter, isRefine = isLiveRefine)
+                    val errorMsg = if (BuildConfig.DEBUG) {
+                        getString(R.string.status_search_error, e.message ?: "")
+                    } else {
+                        getString(R.string.status_search_error_generic)
+                    }
+                    showStatus(errorMsg)
+                    homeResultsUi.onSearchFinished(
+                        emptyList(),
+                        rawQuery,
+                        resultsAdapter,
+                        indexedCount = if (::indexer.isInitialized) indexer.size else 0,
+                        isRefine = isLiveRefine
+                    )
                     if (!isLiveRefine) syncHomeDecorAnimations()
                 }
             } finally {
@@ -1512,14 +2113,19 @@ class MainActivity : AppCompatActivity() {
     private fun openFile(file: IndexedFile) {
         userDismissedSearchFocus = true
         try {
-            val uri = FileProvider.getUriForFile(this, "$packageName.provider", File(file.path))
+            val staged = ShareFileAccess.stageForProvider(this, file.path)
+            if (staged == null) {
+                showToast(getString(R.string.toast_cannot_open, file.name))
+                return
+            }
+            val uri = ShareFileAccess.providerUri(this, staged)
             val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension) ?: "*/*"
             startActivity(Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, mime)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             })
         } catch (e: Exception) {
-            showToast("Cannot open: ${e.message}")
+            showToast(getString(R.string.toast_cannot_open, e.message ?: ""))
         }
     }
 
@@ -1754,7 +2360,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun clearIndex() {
         if (!isEngineReady) {
-            showToast("Model still loading…")
+            showToast(getString(R.string.toast_model_still_loading))
             return
         }
         lifecycleScope.launch(Dispatchers.IO) {
@@ -1780,13 +2386,23 @@ class MainActivity : AppCompatActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         when (requestCode) {
-            REQUEST_READ_STORAGE -> {
-                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startIndexing()
-                else showToast(getString(R.string.permission_denied))
+            StoragePermissionFlow.REQUEST_READ_STORAGE -> {
+                if (pendingPermissionSource != null) {
+                    handleStoragePermissionResult()
+                } else if (StoragePermissionFlow.wasReadStorageGranted(grantResults)) {
+                    startIndexing()
+                } else {
+                    showToast(getString(R.string.permission_denied))
+                }
             }
             REQUEST_RECORD_AUDIO -> {
                 if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startVoiceListening()
                 else showToast(getString(R.string.voice_permission_denied))
+            }
+            REQUEST_POST_NOTIFICATIONS -> {
+                val source = pendingIndexSource
+                pendingIndexSource = null
+                completeStartIndexing(source)
             }
         }
     }
@@ -1794,14 +2410,23 @@ class MainActivity : AppCompatActivity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_MANAGE_STORAGE &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-            Environment.isExternalStorageManager()) startIndexing()
-        else showToast("Full storage access not granted")
+        if (requestCode == StoragePermissionFlow.REQUEST_MANAGE_STORAGE) {
+            if (pendingPermissionSource != null) {
+                handleStoragePermissionResult()
+            } else if (!StoragePermissionFlow.hasAccess(this)) {
+                showToast(getString(R.string.toast_storage_not_granted))
+            }
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        if (pendingPermissionSource != null && StoragePermissionFlow.hasAccess(this)) {
+            handleStoragePermissionResult()
+        }
+        if (currentScreen == Screen.SETTINGS) {
+            refreshSettingsTogglesFromPrefs()
+        }
         syncHomeDecorAnimations()
         if (::searchHintScroller.isInitialized) searchHintScroller.sync()
     }
@@ -1829,12 +2454,15 @@ class MainActivity : AppCompatActivity() {
         stopMicListeningRings()
         stopHintDotBlink()
         stopTaglineCycle()
+        stopLoadingTitleCycle()
         if (::searchHintScroller.isInitialized) searchHintScroller.destroy()
         taglineHandler.removeCallbacksAndMessages(null)
         searchFocusHandler.removeCallbacksAndMessages(null)
         cancelSearchDebounce()
         searchJob?.cancel()
         if (::homeResultsUi.isInitialized) homeResultsUi.destroy()
+        homeLogoSpinner?.detach()
+        homeLogoSpinner = null
         if (::voiceSearchManager.isInitialized) voiceSearchManager.destroy()
         super.onDestroy()
         // Engine, indexer, and DB live in StriderApp — do not close here
@@ -1850,8 +2478,8 @@ class MainActivity : AppCompatActivity() {
         private const val PREF_AUTO_REINDEX = "auto_reindex_enabled"
         private const val PREF_SCAN_DOCUMENT_TEXT = "scan_document_text_enabled"
         private const val PREF_LAST_TAB = "last_tab"
-        private const val REQUEST_READ_STORAGE   = 100
-        private const val REQUEST_MANAGE_STORAGE = 101
-        private const val REQUEST_RECORD_AUDIO   = 102
+        private const val PREF_LAST_INDEX_COMPLETED_AT = "last_index_completed_at"
+        private const val REQUEST_RECORD_AUDIO = 102
+        private const val REQUEST_POST_NOTIFICATIONS = 103
     }
 }

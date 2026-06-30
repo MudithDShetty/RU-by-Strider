@@ -3,20 +3,45 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+import java.security.MessageDigest
+
+static String sha256Hex(File file) {
+    if (file == null || !file.exists()) return ""
+    def digest = MessageDigest.getInstance("SHA-256")
+    file.withInputStream { stream ->
+        byte[] buffer = new byte[256 * 1024]
+        int read
+        while ((read = stream.read(buffer)) != -1) {
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().collect { String.format("%02x", it) }.join()
+}
+
+// Keep in sync with embeddingmodel/build.gradle syncModelAsset source order.
 def embeddingModelCandidates = [
-    file("${rootProject.projectDir}/embeddingmodel/src/main/assets/embedding_model.onnx"),
+    file("${rootProject.projectDir}/model_assets/onnx/model_int8.onnx"),
     file("${rootProject.projectDir}/app/src/debug/assets/embedding_model.onnx"),
-    file("${rootProject.projectDir}/app/src/main/assets/embedding_model.onnx"),
-    file("${rootProject.projectDir}/model_assets/onnx/model.onnx"),
+    file("${rootProject.projectDir}/embeddingmodel/src/main/assets/embedding_model.onnx"),
 ]
 def embeddingModelFile = embeddingModelCandidates.find { it.exists() }
 def embeddingModelBytes = embeddingModelFile != null ? embeddingModelFile.length() : 0L
+def embeddingModelSha256 = embeddingModelFile != null ? sha256Hex(embeddingModelFile) : ""
+
+def fp32ModelCandidates = [
+    file("${rootProject.projectDir}/model_assets/onnx/model.onnx"),
+    file("${rootProject.projectDir}/app/src/debug/assets/embedding_model_fp32.onnx"),
+    file("${rootProject.projectDir}/embeddingmodel_fp32/src/main/assets/embedding_model_fp32.onnx"),
+]
+def fp32ModelFile = fp32ModelCandidates.find { it.exists() && it.length() > 200L * 1024 * 1024 }
+def fp32ModelBytes = fp32ModelFile != null ? fp32ModelFile.length() : 0L
+def fp32ModelSha256 = fp32ModelFile != null ? sha256Hex(fp32ModelFile) : ""
 
 android {
     namespace 'com.strider.quanto'
     compileSdk 34
 
-    assetPacks = [":embeddingmodel"]
+    assetPacks = [":embeddingmodel", ":embeddingmodel_fp32"]
 
     defaultConfig {
         applicationId "com.strider.quanto"
@@ -25,15 +50,24 @@ android {
         versionCode 1
         versionName "1.0"
         buildConfigField "boolean", "EVAL_LOGGING", "true"
+        buildConfigField "boolean", "PROBE_NNAPI", "true"
         buildConfigField "long", "MODEL_BYTES", "${embeddingModelBytes}L"
-        buildConfigField "int", "MODEL_VERSION", "1"
+        buildConfigField "long", "MODEL_FP32_BYTES", "${fp32ModelBytes}L"
+        buildConfigField "String", "MODEL_SHA256", "\"${embeddingModelSha256}\""
+        buildConfigField "String", "MODEL_FP32_SHA256", "\"${fp32ModelSha256}\""
+        buildConfigField "int", "MODEL_VERSION", "3"
+        ndk {
+            abiFilters "arm64-v8a"
+        }
     }
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             buildConfigField "boolean", "EVAL_LOGGING", "false"
+            buildConfigField "boolean", "PROBE_NNAPI", "false"
         }
     }
 
@@ -95,6 +129,7 @@ dependencies {
 
     // Standard Android UI
     implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.core:core-splashscreen:1.0.1'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
@@ -123,15 +158,17 @@ dependencies {
 }
 
 def debugModelSources = [
+    file("${rootProject.projectDir}/model_assets/onnx/model_int8.onnx"),
     file("${rootProject.projectDir}/model_assets/onnx/model.onnx"),
     file("${rootProject.projectDir}/embeddingmodel/src/main/assets/embedding_model.onnx"),
 ]
 def debugModelSource = debugModelSources.find { it.exists() }
+def debugFp32Source = fp32ModelFile
 
 tasks.register("syncDebugModelAsset") {
     doLast {
         if (debugModelSource == null) {
-            logger.warn("No embedding model found for debug — copy model.onnx to app/src/debug/assets/embedding_model.onnx")
+            logger.warn("No embedding model found for debug — copy model to app/src/debug/assets/embedding_model.onnx")
             return
         }
         def destDir = file("src/debug/assets")
@@ -142,6 +179,16 @@ tasks.register("syncDebugModelAsset") {
                 from debugModelSource
                 into destDir
                 rename { "embedding_model.onnx" }
+            }
+        }
+        if (debugFp32Source != null) {
+            def fp32Dest = file("${destDir}/embedding_model_fp32.onnx")
+            if (!fp32Dest.exists() || fp32Dest.length() != debugFp32Source.length()) {
+                copy {
+                    from debugFp32Source
+                    into destDir
+                    rename { "embedding_model_fp32.onnx" }
+                }
             }
         }
     }

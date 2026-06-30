@@ -16,7 +16,12 @@ object SearchEval {
     val GOLDEN_CASES = listOf(
         GoldenQueryCase("nda quantoo", "quantoo", 1),
         GoldenQueryCase("Tanuj", "quantoo", 3),
-        GoldenQueryCase("Nikharv", "quantoo", 3)
+        GoldenQueryCase("Nikharv", "quantoo", 3),
+        GoldenQueryCase("mera aadhaar", "aadhaar", 5),
+        GoldenQueryCase("budget spreadsheet", "finance", 5),
+        GoldenQueryCase("invoice march", "invoice", 5),
+        GoldenQueryCase("python tutorial notes", "python", 5),
+        GoldenQueryCase("vacation beach photo", "photo", 5)
     )
 
     data class GoldenResult(

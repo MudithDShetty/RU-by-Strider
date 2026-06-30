@@ -17,6 +17,8 @@ import com.strider.quanto.eval.EvalLogger
 import com.strider.quanto.eval.IndexPhaseTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class IndexingWorker(
@@ -26,6 +28,8 @@ class IndexingWorker(
 
     private var lastForegroundAtMs = 0L
     private var lastProgressAtMs = 0L
+    private var lastForegroundCount = -1
+    private val progressMutex = Mutex()
 
     override suspend fun doWork(): ListenableWorker.Result = withContext(Dispatchers.IO) {
         val app = applicationContext as StriderApp
@@ -39,7 +43,7 @@ class IndexingWorker(
             var waitedMs = 0L
             while ((!app.isEngineReady || !app.isCoreInitialized) && waitedMs < MAX_MODEL_WAIT_MS) {
                 val secs = waitedMs / 1000
-                setProgress(
+                setProgressQuiet(
                     workDataOf(
                         KEY_STATUS to "Waiting for AI model… (${secs}s)",
                         KEY_PHASE to PHASE_WAITING_MODEL
@@ -52,26 +56,34 @@ class IndexingWorker(
                 if (EvalLogger.enabled) {
                     EvalLogger.logIndexWorker("retry", waitForModelMs = waitedMs)
                 }
-                setProgress(
-                    workDataOf(
-                        KEY_STATUS to "AI model not ready yet — will retry",
-                        KEY_PHASE to PHASE_WAITING_MODEL
-                    )
-                )
                 return@withContext ListenableWorker.Result.retry()
             }
             phaseTracker?.end(PHASE_WAITING_MODEL)
         }
 
+        if (!StorageAccess.canIndexStorage(applicationContext)) {
+            if (EvalLogger.enabled) {
+                EvalLogger.logIndexWorker("failure", error = "Storage not accessible")
+            }
+            return@withContext ListenableWorker.Result.failure(
+                workDataOf(
+                    KEY_STATUS to "Storage access required — grant full file access in Settings",
+                    KEY_PHASE to PHASE_FAILED
+                )
+            )
+        }
+
         val rootPath = Environment.getExternalStorageDirectory().absolutePath
-        setProgress(
+        setProgressQuiet(
             workDataOf(
                 KEY_STATUS to "Starting indexer…",
                 KEY_PHASE to PHASE_SCANNING,
                 KEY_COUNT to 0
             )
         )
-        setForegroundSafe(buildForegroundInfo(0, "Starting indexer…"))
+        setForegroundSafe(buildForegroundInfo(0, "Starting indexer…", PHASE_SCANNING))
+
+        val forceFull = inputData.getBoolean(KEY_FORCE_FULL, false)
 
         try {
             val scanDocumentText = applicationContext.getSharedPreferences(
@@ -83,21 +95,25 @@ class IndexingWorker(
                 rootPath = rootPath,
                 source = source,
                 scanDocumentText = scanDocumentText,
+                forceFull = forceFull,
                 phaseTracker = phaseTracker,
                 onProgress = { msg ->
+                    val scanCount = Regex("(\\d+) files found").find(msg)?.groupValues?.get(1)?.toIntOrNull()
+                    val indexingTotal = Regex("Indexing (\\d+) files").find(msg)?.groupValues?.get(1)?.toIntOrNull()
                     reportProgress(
-                        count = app.indexer.size,
+                        count = scanCount ?: app.indexer.size,
                         status = msg,
                         phase = phaseForMessage(msg),
+                        total = indexingTotal ?: 0,
                         force = true
                     )
                 },
-                onFileIndexed = { indexed, _, _ ->
+                onFileIndexed = { indexed, skipped, _ ->
                     reportProgress(
-                        count = indexed,
-                        status = "Indexing files…",
+                        count = app.indexer.size,
+                        status = "Indexing files… ($indexed new, $skipped unchanged)",
                         phase = PHASE_INDEXING,
-                        total = app.indexer.size
+                        total = indexed + skipped
                     )
                 }
             )
@@ -106,40 +122,58 @@ class IndexingWorker(
                 app.enqueueOcrIndexing()
             }
 
-            app.scheduleDeferredEmbeddingWarmIfNeeded()
+            warmEmbeddingCacheAfterIndex(app)
 
-            if (EvalLogger.enabled) {
-                EvalLogger.logIndexWorker("success", totalFiles = app.indexer.size)
+            if (shouldMarkEmbeddingModelSynced(forceFull, app, result)) {
+                app.markEmbeddingModelSynced()
+            }
+            if (EvalLogger.enabled && result.indexedCount > 0) {
+                EmbeddingQualityEval.runIfNeeded(app)
             }
 
-            setProgress(
+            if (EvalLogger.enabled) {
+                EvalLogger.logIndexWorker("success", totalFiles = app.indexer.size, forceFull = forceFull)
+            }
+
+            return@withContext ListenableWorker.Result.success(
                 workDataOf(
+                    KEY_COUNT to app.indexer.size,
                     KEY_STATUS to "✓ Index complete",
                     KEY_PHASE to PHASE_DONE,
-                    KEY_COUNT to app.indexer.size,
                     KEY_DONE to true
                 )
             )
-            ListenableWorker.Result.success(
-                workDataOf(
-                    KEY_COUNT to app.indexer.size,
-                    KEY_STATUS to "✓ Index complete",
-                    KEY_PHASE to PHASE_DONE
-                )
-            )
         } catch (e: Exception) {
-            if (EvalLogger.enabled) {
-                EvalLogger.logIndexWorker("failure", error = e.message)
+            if (e is IllegalStateException && e.message?.contains("mutex busy") == true) {
+                if (EvalLogger.enabled) {
+                    EvalLogger.logIndexWorker("retry", error = e.message, forceFull = forceFull)
+                }
+                return@withContext ListenableWorker.Result.retry()
             }
-            setProgress(
-                workDataOf(
-                    KEY_STATUS to "Index failed: ${e.message}",
-                    KEY_PHASE to PHASE_FAILED
+            if (e is SecurityException) {
+                if (EvalLogger.enabled) {
+                    EvalLogger.logIndexWorker("failure", error = e.message, forceFull = forceFull)
+                }
+                return@withContext ListenableWorker.Result.failure(
+                    workDataOf(
+                        KEY_STATUS to (e.message ?: "Storage permission required"),
+                        KEY_PHASE to PHASE_FAILED
+                    )
                 )
-            )
-            ListenableWorker.Result.failure(
-                workDataOf(KEY_STATUS to (e.message ?: "Unknown error"))
-            )
+            }
+            if (EvalLogger.enabled) {
+                EvalLogger.logIndexWorker("failure", error = e.message, forceFull = forceFull)
+            }
+            val message = e.message ?: "Unknown error"
+            if (runAttemptCount >= 3) {
+                return@withContext ListenableWorker.Result.failure(
+                    workDataOf(
+                        KEY_STATUS to message,
+                        KEY_PHASE to PHASE_FAILED
+                    )
+                )
+            }
+            return@withContext ListenableWorker.Result.retry()
         }
     }
 
@@ -163,17 +197,47 @@ class IndexingWorker(
             )
         )
 
-        if (now - lastForegroundAtMs >= FOREGROUND_THROTTLE_MS) {
+        if (now - lastForegroundAtMs >= FOREGROUND_THROTTLE_MS ||
+            (phase == PHASE_SCANNING && count != lastForegroundCount)
+        ) {
             lastForegroundAtMs = now
-            setForegroundSafe(buildForegroundInfo(count, status))
+            lastForegroundCount = count
+            setForegroundSafe(buildForegroundInfo(count, status, phase, total))
         }
     }
 
     private suspend fun setProgressQuiet(data: Data) {
-        try {
+        progressMutex.withLock {
             setProgress(data)
-        } catch (e: Exception) {
-            android.util.Log.w(TAG, "setProgress failed: ${e.message}")
+        }
+    }
+
+    private fun shouldMarkEmbeddingModelSynced(
+        forceFull: Boolean,
+        app: StriderApp,
+        result: IndexDirectoryResult
+    ): Boolean {
+        if (!forceFull && !app.needsEmbeddingReindex()) return false
+        if (result.indexedCount > 0) return true
+        if (result.skippedCount > 0) return true
+        return false
+    }
+
+    private suspend fun warmEmbeddingCacheAfterIndex(app: StriderApp) {
+        if (app.db.getTotalCount() < 50) return
+        if (app.db.isEmbeddingCacheWarm()) return
+        if (!EmbeddingGuardrails.tryAcquireWarming()) {
+            app.scheduleDeferredEmbeddingWarmIfNeeded()
+            return
+        }
+        try {
+            app.db.warmEmbeddingCache()
+            android.util.Log.i(TAG, "Post-index cache warm: ${app.db.isEmbeddingCacheWarm()}")
+        } catch (e: OutOfMemoryError) {
+            android.util.Log.w(TAG, "Post-index cache warm OOM — deferred warm will retry", e)
+            app.scheduleDeferredEmbeddingWarmIfNeeded()
+        } finally {
+            EmbeddingGuardrails.releaseWarming()
         }
     }
 
@@ -187,11 +251,18 @@ class IndexingWorker(
 
     private fun phaseForMessage(msg: String): String = when {
         msg.contains("Scanning", ignoreCase = true) -> PHASE_SCANNING
-        msg.contains("batch", ignoreCase = true) -> PHASE_INDEXING
+        msg.contains("Found ", ignoreCase = true) && msg.contains("supported files", ignoreCase = true) ->
+            PHASE_SCANNING
+        msg.contains("up to date", ignoreCase = true) -> PHASE_DONE
         else -> PHASE_INDEXING
     }
 
-    private fun buildForegroundInfo(count: Int, status: String): ForegroundInfo {
+    private fun buildForegroundInfo(
+        count: Int,
+        status: String,
+        phase: String,
+        total: Int = 0
+    ): ForegroundInfo {
         val openApp = PendingIntent.getActivity(
             applicationContext,
             0,
@@ -199,21 +270,29 @@ class IndexingWorker(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(
+        val bodyRes = when (phase) {
+            PHASE_SCANNING -> R.string.notification_indexing_scanning_body
+            else -> R.string.notification_indexing_body
+        }
+        val builder = NotificationCompat.Builder(
             applicationContext,
             StriderApp.NOTIFICATION_CHANNEL_ID
         )
             .setContentTitle(applicationContext.getString(R.string.notification_indexing_title))
-            .setContentText(
-                applicationContext.getString(R.string.notification_indexing_body, count)
-            )
+            .setContentText(applicationContext.getString(bodyRes, count))
             .setSubText(status)
             .setSmallIcon(android.R.drawable.ic_menu_search)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setProgress(0, 0, true)
             .setContentIntent(openApp)
-            .build()
+
+        if (phase == PHASE_INDEXING && total > 0) {
+            builder.setProgress(total, count.coerceAtMost(total), false)
+        } else {
+            builder.setProgress(0, 0, true)
+        }
+
+        val notification = builder.build()
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(

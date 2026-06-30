@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/action_share"
+        android:icon="@drawable/ic_share"
+        android:title="@string/file_action_share"
+        app:iconTint="@color/ru_crimson"
+        app:showAsAction="never"/>
+
+    <item
+        android:id="@+id/action_rename"
+        android:icon="@drawable/ic_rename"
+        android:title="@string/file_action_rename"
+        app:iconTint="@color/ru_crimson"
+        app:showAsAction="never"/>
+
+    <item
+        android:id="@+id/action_open_with"
+        android:icon="@drawable/ic_open_with"
+        android:title="@string/file_action_open_with"
+        app:iconTint="@color/ru_crimson"
+        app:showAsAction="never"/>
+
+    <item
+        android:id="@+id/action_details"
+        android:icon="@drawable/ic_info"
+        android:title="@string/file_action_details"
+        app:iconTint="@color/ru_crimson"
+        app:showAsAction="never"/>
+
+    <item
+        android:id="@+id/action_remove"
+        android:icon="@drawable/ic_trash"
+        android:title="@string/file_action_remove"
+        app:iconTint="@color/ru_crimson"
+        app:showAsAction="never"/>
+</menu>

@@ -26,15 +26,19 @@ class OcrIndexingWorker(
             return@withContext ListenableWorker.Result.retry()
         }
 
-        val pending = app.db.getOcrPendingCount()
-        if (pending == 0) {
-            return@withContext ListenableWorker.Result.success()
+        if (!EmbeddingGuardrails.tryAcquireOcr()) {
+            return@withContext ListenableWorker.Result.retry()
         }
 
-        setForeground(buildForegroundInfo(pending, "Reading scanned documents…"))
-        setProgress(workDataOf(KEY_REMAINING to pending))
-
         try {
+            val pending = app.db.getOcrPendingCount()
+            if (pending == 0) {
+                return@withContext ListenableWorker.Result.success()
+            }
+
+            setForeground(buildForegroundInfo(pending, "Reading scanned documents…"))
+            setProgress(workDataOf(KEY_REMAINING to pending))
+
             var lastForegroundAt = 0L
             val processed = app.indexer.processOcrPending(
                 onProgress = { msg ->
@@ -49,26 +53,20 @@ class OcrIndexingWorker(
             )
 
             val remaining = app.db.getOcrPendingCount()
-            setProgress(
-                workDataOf(
-                    KEY_STATUS to "Scanned document reading complete",
-                    KEY_REMAINING to remaining,
-                    KEY_PROCESSED to processed
-                )
-            )
-
             if (remaining > 0) {
                 delay(OCR_CHAIN_DEFER_MS)
                 app.enqueueOcrIndexing()
             }
 
-            ListenableWorker.Result.success(
+            return@withContext ListenableWorker.Result.success(
                 workDataOf(KEY_PROCESSED to processed, KEY_REMAINING to remaining)
             )
         } catch (e: Exception) {
-            ListenableWorker.Result.failure(
+            return@withContext ListenableWorker.Result.failure(
                 workDataOf(KEY_STATUS to (e.message ?: "OCR failed"))
             )
+        } finally {
+            EmbeddingGuardrails.releaseOcr()
         }
     }
 

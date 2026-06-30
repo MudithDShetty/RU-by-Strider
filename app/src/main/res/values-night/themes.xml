@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <style name="Theme.StriderQuanto.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ru_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ru_splash_icon_inset</item>
+        <item name="windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+        <item name="postSplashScreenTheme">@style/Theme.StriderQuanto</item>
+        <item name="android:windowBackground">@color/ru_bg</item>
+        <item name="android:statusBarColor">@color/ru_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
     <style name="Theme.StriderQuanto" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/ru_crimson</item>
         <item name="colorPrimaryVariant">@color/ru_dark</item>

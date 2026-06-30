@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.asset-pack'
+}
+
+assetPack {
+    packName = "embeddingmodel_fp32"
+    dynamicDelivery {
+        deliveryType = "on-demand"
+    }
+}
+
+def modelSources = [
+    file("${rootProject.projectDir}/model_assets/onnx/model.onnx"),
+    file("${rootProject.projectDir}/app/src/debug/assets/embedding_model_fp32.onnx"),
+]
+def modelSource = modelSources.find { it.exists() && it.length() > 200L * 1024 * 1024 }
+def modelDestDir = file("src/main/assets")
+def modelDest = file("${modelDestDir}/embedding_model_fp32.onnx")
+
+tasks.register("syncModelAsset") {
+    doLast {
+        if (modelSource == null) {
+            logger.warn("FP32 model not found — on-demand asset pack will be empty until model is copied")
+            return
+        }
+        modelDestDir.mkdirs()
+        if (!modelDest.exists() || modelDest.length() != modelSource.length()) {
+            project.copy {
+                from modelSource
+                into modelDestDir
+                rename { "embedding_model_fp32.onnx" }
+            }
+            logger.lifecycle("Synced FP32 model to on-demand asset pack (${modelDest.length()} bytes)")
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name.startsWith("generate") || task.name.contains("AssetPack") || task.name == "preBuild") {
+        task.dependsOn("syncModelAsset")
+    }
+}

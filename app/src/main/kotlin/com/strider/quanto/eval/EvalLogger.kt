@@ -104,7 +104,11 @@ object EvalLogger {
         totalFiles: Int,
         durationMs: Long,
         categoryCounts: Map<Category, Int>,
-        phases: List<IndexPhaseRecord> = emptyList()
+        phases: List<IndexPhaseRecord> = emptyList(),
+        embeddingBackend: String? = null,
+        modelVersion: Int? = null,
+        msPerFile: Long? = null,
+        batchSize: Int? = null
     ) {
         if (!enabled) return
         val props = linkedMapOf<String, Any?>(
@@ -116,24 +120,46 @@ object EvalLogger {
             "duration_ms" to durationMs,
             "category_counts" to categoryCounts.mapKeys { it.key.name }
         )
+        embeddingBackend?.let { props["embedding_backend"] = it }
+        modelVersion?.let { props["model_version"] = it }
+        msPerFile?.let { props["ms_per_file"] = it }
+        batchSize?.let { props["batch_size"] = it }
         if (phases.isNotEmpty()) {
             props["phases"] = phases.map { it.toMap() }
         }
         dispatch("index", EvalEvent.toJsonLine("index_completed", props))
     }
 
+    fun logEmbeddingProbe(
+        backend: String,
+        probeMs: Long,
+        reason: String?,
+        msPerFile: Float = 0f
+    ) {
+        if (!enabled) return
+        val props = mapOf<String, Any?>(
+            "backend" to backend,
+            "probe_ms" to probeMs,
+            "reason" to reason,
+            "ms_per_file" to msPerFile
+        )
+        dispatch("init", EvalEvent.toJsonLine("embedding_probe", props))
+    }
+
     fun logIndexWorker(
         status: String,
         waitForModelMs: Long = 0,
         totalFiles: Int = 0,
-        error: String? = null
+        error: String? = null,
+        forceFull: Boolean = false
     ) {
         if (!enabled) return
         val props = mapOf<String, Any?>(
             "status" to status,
             "wait_for_model_ms" to waitForModelMs,
             "total_files" to totalFiles,
-            "error" to error
+            "error" to error,
+            "force_full" to forceFull
         )
         dispatch("index", EvalEvent.toJsonLine("index_worker", props))
     }

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ru · Onboarding screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700&family=Tiro+Devanagari+Hindi:ital@0;1&family=Hanken+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :root {
+    --crimson: #C41E3A;
+    --gold: #B37200;
+    --swirl: #7C4A23;
+    --ink: #2A1D10;
+    --ink-soft: rgba(58,42,24,.56);
+    --bg: #F3E7CE;
+    --bg-deep: #ECDDBE;
+  }
+  html, body {
+    margin: 0; height: 100%;
+    background: radial-gradient(120% 90% at 50% 0%, #efe7d6 0%, #e7ddc8 55%, #ddd2ba 100%);
+    font-family: 'Hanken Grotesk', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #fit { transform-origin: center center; display: flex; gap: 80px; align-items: flex-start; }
+
+  .device { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+  .caption { font-size: 15px; font-weight: 600; letter-spacing: .3px; color: rgba(58,42,24,.5); }
+
+  /* ---------------- phone ---------------- */
+  .phone {
+    position: relative; width: 390px; height: 844px;
+    border-radius: 46px; background: #0c0a0f; padding: 9px;
+    box-shadow: 0 2px 4px rgba(0,0,0,.5) inset, 0 50px 90px -30px rgba(40,30,10,.55), 0 18px 40px -20px rgba(40,30,10,.4);
+  }
+  .screen {
+    position: relative; width: 100%; height: 100%;
+    border-radius: 38px; overflow: hidden;
+    background: radial-gradient(140% 100% at 50% -8%, #FBF1D6 0%, var(--bg) 46%, var(--bg-deep) 100%);
+    color: var(--ink);
+    display: flex; flex-direction: column;
+  }
+  .screen::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+    background:
+      radial-gradient(60% 40% at 80% 88%, rgba(196,30,58,.05), transparent 70%),
+      radial-gradient(50% 36% at 16% 8%, rgba(179,114,0,.06), transparent 70%);
+  }
+  .notch { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); width: 11px; height: 11px; border-radius: 50%; background: #0c0a0f; z-index: 40; }
+  .statusbar {
+    position: absolute; top: 0; left: 0; right: 0; height: 54px; z-index: 30;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 30px; font-size: 14px; font-weight: 600; color: var(--ink); opacity: .82;
+  }
+  .statusbar .ico { display: flex; gap: 6px; align-items: center; }
+
+  .content {
+    position: relative; z-index: 10; flex: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 0 40px 40px;
+  }
+
+  /* ---- screen 1: logo only ---- */
+  .mark-lg { width: 230px; height: 230px; filter: drop-shadow(0 16px 30px rgba(124,74,35,.30)); }
+
+  /* ---- screen 2: loading ---- */
+  .mark-sm { width: 150px; height: 150px; filter: drop-shadow(0 12px 24px rgba(124,74,35,.28)); }
+  .status { margin-top: 56px; text-align: center; }
+  .heading {
+    display: grid; justify-items: center; margin: 0; min-height: 32px;
+  }
+  .heading span {
+    grid-area: 1 / 1; white-space: nowrap;
+    color: var(--ink); opacity: 0; transition: opacity .6s ease;
+  }
+  .heading .h-en { font-family: 'Fraunces', serif; font-weight: 400; font-size: 25px; letter-spacing: -.2px; }
+  .heading .h-hi { font-family: 'Tiro Devanagari Hindi', serif; font-weight: 400; font-size: 21px; }
+  .heading span.show { opacity: 1; }
+  .subline { font-size: 15px; color: var(--ink-soft); margin: 13px 0 0; }
+
+  .progress-wrap { width: 100%; max-width: 244px; margin: 30px auto 0; }
+  .track { height: 6px; border-radius: 100px; background: rgba(124,74,35,.16); overflow: hidden; }
+  .fill {
+    height: 100%; width: 0%; border-radius: 100px;
+    background: var(--crimson);
+    transition: width .35s linear;
+  }
+  .pct { text-align: center; margin: 13px 0 0; font-size: 13px; font-weight: 600; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="fit">
+
+      <!-- ===== SCREEN 1 — logo only ===== -->
+      <div class="device">
+        <div class="phone">
+          <div class="notch"></div>
+          <div class="screen">
+            <div class="statusbar">
+              <span>9:41</span>
+              <span class="ico">
+                <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="6" width="3" height="5" rx="1"/><rect x="4.5" y="4" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="9" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg>
+                <svg width="22" height="11" viewBox="0 0 24 12" fill="none"><rect x="1" y="1" width="20" height="10" rx="3" stroke="currentColor" stroke-width="1.2" opacity=".5"/><rect x="2.5" y="2.5" width="15" height="7" rx="1.5" fill="currentColor"/><rect x="22" y="4" width="1.6" height="4" rx="1" fill="currentColor" opacity=".5"/></svg>
+              </span>
+            </div>
+            <div class="content">
+              <img class="mark-lg" src="assets/ru-mark.png" alt="Ru logo">
+            </div>
+          </div>
+        </div>
+        <div class="caption">Splash</div>
+      </div>
+
+      <!-- ===== SCREEN 2 — loading ===== -->
+      <div class="device">
+        <div class="phone">
+          <div class="notch"></div>
+          <div class="screen">
+            <div class="statusbar">
+              <span>9:41</span>
+              <span class="ico">
+                <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="6" width="3" height="5" rx="1"/><rect x="4.5" y="4" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="9" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg>
+                <svg width="22" height="11" viewBox="0 0 24 12" fill="none"><rect x="1" y="1" width="20" height="10" rx="3" stroke="currentColor" stroke-width="1.2" opacity=".5"/><rect x="2.5" y="2.5" width="15" height="7" rx="1.5" fill="currentColor"/><rect x="22" y="4" width="1.6" height="4" rx="1" fill="currentColor" opacity=".5"/></svg>
+              </span>
+            </div>
+            <div class="content">
+              <img class="mark-sm" src="assets/ru-mark.png" alt="Ru logo">
+              <div class="status">
+                <h2 class="heading">
+                  <span class="h-hi show">आपका मॉडल तैयार हो रहा है</span>
+                  <span class="h-en">Your model is loading</span>
+                </h2>
+                <p class="subline">Please wait…</p>
+                <div class="progress-wrap">
+                  <div class="track"><div class="fill" id="fill"></div></div>
+                  <div class="pct" id="pct">0%</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caption">Loading</div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+  /* simple determinate progress fill on screen 2 */
+  const fill = document.getElementById('fill');
+  const pctEl = document.getElementById('pct');
+  let start = null;
+  const total = 6500;
+  function tick(now) {
+    if (start === null) start = now;
+    const t = Math.min(1, (now - start) / total);
+    const eased = 1 - Math.pow(1 - t, 1.8);
+    const p = Math.round(eased * 100);
+    fill.style.width = p + '%';
+    pctEl.textContent = p + '%';
+    if (t < 1) requestAnimationFrame(tick);
+    else { pctEl.textContent = 'Ready'; setTimeout(() => { start = null; requestAnimationFrame(tick); }, 1400); }
+  }
+  requestAnimationFrame(tick);
+
+  /* ---- alternating heading: Hindi <-> English (like the app tagline) ---- */
+  const hHi = document.querySelector('.heading .h-hi');
+  const hEn = document.querySelector('.heading .h-en');
+  let showHi = true;
+  setInterval(() => {
+    const cur = showHi ? hHi : hEn;
+    const next = showHi ? hEn : hHi;
+    cur.classList.remove('show');
+    setTimeout(() => next.classList.add('show'), 600);
+    showHi = !showHi;
+  }, 4200);
+
+  /* fit both phones to viewport */
+  function fitScale() {
+    const fit = document.getElementById('fit');
+    const w = fit.scrollWidth, h = fit.scrollHeight;
+    const s = Math.min((window.innerWidth - 48) / w, (window.innerHeight - 48) / h, 1);
+    fit.style.transform = `scale(${s})`;
+  }
+  window.addEventListener('resize', fitScale);
+  fitScale();
+</script>
+</body>
+</html>

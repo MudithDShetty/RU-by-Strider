@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 rootProject.name = "StriderQuanto"
 include ':app'
 include ':embeddingmodel'
+include ':embeddingmodel_fp32'

@@ -1,7 +1,5 @@
 package com.strider.quanto
 
-import android.util.Log
-
 private const val TAG = "DiskSearch"
 
 /**
@@ -46,11 +44,11 @@ object DiskSearch {
 
         val filenamePaths = preFilenamePaths ?: FilenameSearch.gatherPaths(db, query)
         filenamePaths.forEach { paths.add(it) }
-        Log.d(TAG, "Filename candidates: ${filenamePaths.size}")
+        RuLog.d(TAG) { "Filename candidates: ${filenamePaths.size}" }
 
         val contentPaths = preContentPaths ?: ContentSearch.gatherPaths(db, query)
         contentPaths.forEach { paths.add(it) }
-        Log.d(TAG, "Content candidates: ${contentPaths.size}")
+        RuLog.d(TAG) { "Content candidates: ${contentPaths.size}" }
 
         val ftsHits = db.ftsSearch(
             query.cleanQueryForEmbedding,
@@ -58,12 +56,12 @@ object DiskSearch {
             limit = ftsLimit
         )
         ftsHits.forEach { (path, _) -> paths.add(path) }
-        Log.d(TAG, "FTS candidates (${if (expanded) "expanded" else "normal"}): ${ftsHits.size} / limit $ftsLimit")
+        RuLog.d(TAG) { "FTS candidates (${if (expanded) "expanded" else "normal"}): ${ftsHits.size} / limit $ftsLimit" }
 
         if (query.categoryHints.isNotEmpty()) {
             val catPaths = db.loadPathsByCategories(query.categoryHints, catLimit)
             catPaths.forEach { paths.add(it) }
-            Log.d(TAG, "Category candidates: ${catPaths.size}")
+            RuLog.d(TAG) { "Category candidates: ${catPaths.size}" }
         }
 
         val isSpecific = query.periodHints.isNotEmpty() ||
@@ -75,15 +73,14 @@ object DiskSearch {
             val recentLimit = scaledRecentLimit(totalCount, expanded, isSpecific)
             val recent = db.loadRecentPaths(recentLimit)
             recent.forEach { paths.add(it) }
-            Log.d(
-                TAG,
+            RuLog.d(TAG) {
                 "Recent candidates: ${recent.size} (specific=$isSpecific expanded=$expanded ftsWeak=$ftsWeak)"
-            )
+            }
         }
 
         val pinnedPaths = (filenamePaths + contentPaths).distinct()
         val result = mergeExactMatchPriority(paths, pinnedPaths, maxPaths)
-        Log.d(TAG, "Total candidate pool: ${result.size} / $totalCount indexed (cap $maxPaths)")
+        RuLog.d(TAG) { "Total candidate pool: ${result.size} / $totalCount indexed (cap $maxPaths)" }
         return result
     }
 

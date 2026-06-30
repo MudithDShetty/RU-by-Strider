@@ -8,11 +8,12 @@ object TokenPathFilter {
     fun filterFilenamePaths(
         db: DatabaseHelper,
         sqlPaths: List<String>,
-        tokens: List<String>
+        tokens: List<String>,
+        stubCache: MutableMap<String, IndexedFileStub>? = null
     ): List<String> {
         if (sqlPaths.isEmpty() || tokens.isEmpty()) return sqlPaths
 
-        val stubByPath = db.loadStubsForPaths(sqlPaths).associateBy { it.path }
+        val stubByPath = db.loadStubsForPaths(sqlPaths, stubCache).associateBy { it.path }
 
         fun nameStemFor(path: String): String? =
             stubByPath[path]?.let { QueryScoring.filenameStem(it.name) }
@@ -38,11 +39,12 @@ object TokenPathFilter {
     fun filterContentPaths(
         db: DatabaseHelper,
         sqlPaths: List<String>,
-        tokens: List<String>
+        tokens: List<String>,
+        stubCache: MutableMap<String, IndexedFileStub>? = null
     ): List<String> {
         if (sqlPaths.isEmpty() || tokens.isEmpty()) return sqlPaths
 
-        val stubByPath = db.loadStubsForPaths(sqlPaths).associateBy { it.path }
+        val stubByPath = db.loadStubsForPaths(sqlPaths, stubCache).associateBy { it.path }
 
         fun fieldsFor(path: String): Triple<String, String, String>? {
             val stub = stubByPath[path] ?: return null

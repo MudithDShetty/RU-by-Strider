@@ -1,21 +1,32 @@
 package com.strider.quanto
 
 import android.content.Context
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
+import android.view.HapticFeedbackConstants
+import android.view.View
 import android.widget.TextView
 import android.util.TypedValue
 import androidx.annotation.DimenRes
 import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
+import androidx.core.graphics.ColorUtils
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 object RuUi {
+
+    /** Matches [R.color.ru_focus_ring] alpha — used for type-colored row ripples. */
+    private const val EXT_RIPPLE_ALPHA = 0x38
 
     private val resultDateFormat = ThreadLocal.withInitial {
         SimpleDateFormat("d MMM", Locale.getDefault())
@@ -95,6 +106,41 @@ object RuUi {
         else -> ContextCompat.getColor(context, R.color.cat_general)
     }
 
+    /** Left accent on search result rows — keyed to ext_* palette (light/dark aware). */
+    fun extAccentColor(context: Context, extUpper: String): Int =
+        ContextCompat.getColor(context, extAccentColorRes(extUpper))
+
+    fun extAccentColorRes(extUpper: String): Int = when (extUpper) {
+        "PDF" -> R.color.ext_pdf
+        "DOC", "DOCX" -> R.color.ext_doc
+        "XLS", "XLSX", "CSV" -> R.color.ext_xls
+        "PPT", "PPTX" -> R.color.ext_ppt
+        "JPG", "JPEG", "PNG", "GIF", "WEBP", "HEIC", "BMP", "TIFF", "TIF", "AVIF", "SVG", "RAW", "DNG" -> R.color.ext_img
+        "MP3", "WAV", "AAC", "M4A", "FLAC", "OGG", "WMA", "OPUS" -> R.color.ext_audio
+        "MP4", "MKV", "AVI", "MOV", "WEBM", "M4V", "3GP" -> R.color.ext_video
+        "ZIP", "RAR", "7Z", "TAR", "GZ" -> R.color.ext_zip
+        "TXT", "MD", "JSON", "XML", "KT", "JAVA", "PY", "JS", "TS" -> R.color.ext_code
+        else -> R.color.ext_default
+    }
+
+    fun extAccentRippleColor(context: Context, extUpper: String): Int =
+        ColorUtils.setAlphaComponent(extAccentColor(context, extUpper), EXT_RIPPLE_ALPHA)
+
+    /** Press ripple on result rows — tinted to the file-type accent stripe. */
+    fun applyResultRowRipple(view: View, extUpper: String) {
+        val ctx = view.context
+        val mask = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = ctx.resources.getDimension(R.dimen.result_row_radius)
+            setColor(Color.WHITE)
+        }
+        view.foreground = RippleDrawable(
+            ColorStateList.valueOf(extAccentRippleColor(ctx, extUpper)),
+            null,
+            mask,
+        )
+    }
+
     fun formatResultDate(lastModified: Long): String {
         if (lastModified <= 0L) return ""
         return resultDateFormat.get().format(Date(lastModified))
@@ -118,6 +164,29 @@ object RuUi {
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             )
             setSpan(StyleSpan(Typeface.BOLD), start, start + num.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+    }
+
+    fun performTapHaptic(view: View) {
+        if (view.isHapticFeedbackEnabled) {
+            view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        }
+    }
+
+    fun formatRelativeIndexTime(context: Context, timestampMs: Long): String {
+        if (timestampMs <= 0L) return context.getString(R.string.relative_time_just_now)
+        val elapsedMs = (System.currentTimeMillis() - timestampMs).coerceAtLeast(0L)
+        val minutes = TimeUnit.MILLISECONDS.toMinutes(elapsedMs)
+        return when {
+            minutes < 1 -> context.getString(R.string.relative_time_just_now)
+            minutes < 60 -> context.getString(R.string.relative_time_minutes, minutes.toInt())
+            minutes < 24 * 60 -> context.getString(R.string.relative_time_hours, (minutes / 60).toInt())
+            minutes < 48 * 60 -> context.getString(R.string.relative_time_yesterday)
+            minutes < 7 * 24 * 60 -> context.getString(
+                R.string.relative_time_days,
+                (minutes / (24 * 60)).toInt()
+            )
+            else -> resultDateFormat.get().format(Date(timestampMs))
         }
     }
 }

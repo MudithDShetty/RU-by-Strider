@@ -9,7 +9,7 @@
     },
     "index_completed": {
       "file": "events/index_YYYY-MM-DD.jsonl",
-      "fields": ["source", "indexed_count", "skipped_count", "deleted_count", "total_files", "duration_ms", "category_counts", "phases"]
+      "fields": ["source", "indexed_count", "skipped_count", "deleted_count", "total_files", "duration_ms", "category_counts", "phases", "embedding_backend", "model_version"]
     },
     "index_phase": {
       "file": "events/index_YYYY-MM-DD.jsonl",
@@ -17,7 +17,11 @@
     },
     "index_worker": {
       "file": "events/index_YYYY-MM-DD.jsonl",
-      "fields": ["status", "wait_for_model_ms", "total_files", "error"]
+      "fields": ["status", "wait_for_model_ms", "total_files", "error", "force_full"]
+    },
+    "embedding_probe": {
+      "file": "events/init_YYYY-MM-DD.jsonl",
+      "fields": ["backend", "probe_ms", "reason", "ms_per_file"]
     },
     "init_phase": {
       "file": "events/init_YYYY-MM-DD.jsonl",

@@ -33,6 +33,27 @@
     <color name="ru_result_row_shadow">#40000000</color>
     <color name="ru_crimson_accent_deep">#C73048</color>
 
+    <!-- Category colors (ink theme) -->
+    <color name="cat_work">#6B8FE8</color>
+    <color name="cat_identity">#E8455C</color>
+    <color name="cat_education">#BD9F5A</color>
+    <color name="cat_personal">#3DB896</color>
+    <color name="cat_media">#9B72F0</color>
+    <color name="cat_general">#80F4F1EA</color>
+
+    <!-- Extension badge backgrounds (ink theme) -->
+    <color name="ext_pdf">#E8455C</color>
+    <color name="ext_doc">#5B7FC4</color>
+    <color name="ext_xls">#3A9B6E</color>
+    <color name="ext_ppt">#D4A843</color>
+    <color name="ext_media">#9B72F0</color>
+    <color name="ext_img">@color/ext_media</color>
+    <color name="ext_audio">@color/ext_media</color>
+    <color name="ext_video">@color/ext_media</color>
+    <color name="ext_code">#F4F1EA</color>
+    <color name="ext_zip">#80F4F1EA</color>
+    <color name="ext_default">#E8455C</color>
+
     <color name="badge_bg">#2A1518</color>
     <color name="badge_text">#E8455C</color>
 </resources>

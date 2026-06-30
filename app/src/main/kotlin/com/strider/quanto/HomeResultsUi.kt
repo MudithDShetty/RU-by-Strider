@@ -19,6 +19,7 @@ class HomeResultsUi(
     private val uiAnimDuration: (Long) -> Long = { ms -> ms },
     private val onResultsLayoutUpdated: () -> Unit = {},
     private val onClearSearch: () -> Unit = {},
+    private val onGoToIndex: () -> Unit = {},
 ) {
     private var resultsMode = false
     private var searching = false
@@ -36,6 +37,7 @@ class HomeResultsUi(
     fun setup() {
         binding.resultsSheet.visibility = View.GONE
         binding.btnClearSearch.setOnClickListener { onClearSearch() }
+        binding.btnResultsEmptyAction.setOnClickListener { onGoToIndex() }
         setupSheetDrag()
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             scheduleRelayoutFromInsets(insets)
@@ -73,7 +75,7 @@ class HomeResultsUi(
         cancelPendingSkeleton()
         if (!resultsMode) enterResultsMode(animated = true)
         ensureFullHeightSheet()
-        binding.tvResultsEmpty.visibility = View.GONE
+        hideEmptyState()
         showResultsPanel(expanded = true)
         onNavVisibility(true, true)
         val delay = animDuration(SKELETON_DELAY_MS)
@@ -104,6 +106,7 @@ class HomeResultsUi(
         results: List<SearchResult>,
         query: String,
         resultsAdapter: ResultsAdapter,
+        indexedCount: Int = 0,
         isRefine: Boolean = false,
         onListApplied: (() -> Unit)? = null,
     ) {
@@ -117,11 +120,17 @@ class HomeResultsUi(
         }
         if (!resultsMode) enterResultsMode(animated = true)
         if (results.isEmpty()) {
-            binding.tvResultsEmpty.text =
-                binding.root.context.getString(R.string.results_empty, query)
-            binding.tvResultsEmpty.visibility = View.VISIBLE
-            binding.tvResultsCount.text =
-                binding.root.context.getString(R.string.results_empty, query)
+            val emptyMode = when {
+                query.isBlank() -> EmptyStateMode.KeepTyping
+                indexedCount == 0 -> EmptyStateMode.NoIndex
+                else -> EmptyStateMode.NoMatch
+            }
+            showEmptyState(emptyMode, query)
+            binding.tvResultsCount.text = when (emptyMode) {
+                EmptyStateMode.NoIndex -> binding.root.context.getString(R.string.results_empty_no_index_title)
+                EmptyStateMode.KeepTyping -> binding.root.context.getString(R.string.results_keep_typing)
+                EmptyStateMode.NoMatch -> binding.root.context.getString(R.string.results_empty, query)
+            }
             resultsAdapter.submitList(emptyList()) {
                 binding.rvResults.adapter = resultsAdapter
                 if (!isRefine) {
@@ -131,7 +140,7 @@ class HomeResultsUi(
                 onListApplied?.invoke()
             }
         } else {
-            binding.tvResultsEmpty.visibility = View.GONE
+            hideEmptyState()
             binding.tvResultsCount.text = RuUi.formatResultsCountHeader(binding.root.context, results.size)
             resultsAdapter.submitList(results) {
                 binding.rvResults.adapter = resultsAdapter
@@ -144,6 +153,34 @@ class HomeResultsUi(
         }
         skeletonShown = false
         if (!isRefine) onNavVisibility(true, true)
+    }
+
+    private enum class EmptyStateMode { NoIndex, NoMatch, KeepTyping }
+
+    private fun showEmptyState(mode: EmptyStateMode, query: String) {
+        val ctx = binding.root.context
+        binding.llResultsEmpty.visibility = View.VISIBLE
+        when (mode) {
+            EmptyStateMode.NoIndex -> {
+                binding.tvResultsEmptyTitle.text = ctx.getString(R.string.results_empty_no_index_title)
+                binding.tvResultsEmptySub.text = ctx.getString(R.string.results_empty_no_index_sub)
+                binding.btnResultsEmptyAction.visibility = View.VISIBLE
+            }
+            EmptyStateMode.NoMatch -> {
+                binding.tvResultsEmptyTitle.text = ctx.getString(R.string.results_empty, query)
+                binding.tvResultsEmptySub.text = ctx.getString(R.string.results_empty_no_match_tip)
+                binding.btnResultsEmptyAction.visibility = View.GONE
+            }
+            EmptyStateMode.KeepTyping -> {
+                binding.tvResultsEmptyTitle.text = ctx.getString(R.string.results_keep_typing)
+                binding.tvResultsEmptySub.text = ""
+                binding.btnResultsEmptyAction.visibility = View.GONE
+            }
+        }
+    }
+
+    private fun hideEmptyState() {
+        binding.llResultsEmpty.visibility = View.GONE
     }
 
     fun closeResults(animated: Boolean) {
@@ -166,9 +203,10 @@ class HomeResultsUi(
         binding.svHome.visibility = View.VISIBLE
         ensureFullHeightSheet()
         restoreSpacers()
-        binding.tvResultsEmpty.visibility = View.GONE
+        hideEmptyState()
         binding.llSharePicker.visibility = View.GONE
         binding.btnClearSearch.visibility = View.GONE
+        binding.flClearSearch.visibility = View.GONE
         binding.llSearchHelper.visibility = View.VISIBLE
         onNavVisibility(false, animated)
 
@@ -229,7 +267,6 @@ class HomeResultsUi(
         binding.llResultsTop.animate().cancel()
         binding.svHome.visibility = View.GONE
         binding.llResultsTop.visibility = View.VISIBLE
-        binding.tvResultsWordmark.visibility = View.GONE
         binding.root.bringChildToFront(binding.llResultsTop)
         binding.root.bringChildToFront(binding.resultsSheet)
         moveSearchBarToResultsTop()
@@ -249,6 +286,7 @@ class HomeResultsUi(
         }
         collapseSpacers()
         binding.llSearchHelper.visibility = View.GONE
+        binding.flClearSearch.visibility = View.VISIBLE
         binding.btnClearSearch.visibility = View.VISIBLE
     }
 
@@ -326,10 +364,11 @@ class HomeResultsUi(
     }
 
     private fun ensureFullHeightSheet() {
-        val rvLp = binding.rvResults.layoutParams as LinearLayout.LayoutParams
-        rvLp.height = 0
-        rvLp.weight = 1f
-        binding.rvResults.layoutParams = rvLp
+        val container = binding.flResultsList
+        val containerLp = container.layoutParams as LinearLayout.LayoutParams
+        containerLp.height = 0
+        containerLp.weight = 1f
+        container.layoutParams = containerLp
     }
 
     private fun moveSearchBarToResultsTop() {

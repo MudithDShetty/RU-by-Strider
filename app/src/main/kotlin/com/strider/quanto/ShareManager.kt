@@ -3,8 +3,7 @@ package com.strider.quanto
 import android.content.Context
 import android.content.Intent
 import android.webkit.MimeTypeMap
-import androidx.core.content.FileProvider
-import java.io.File
+import android.widget.Toast
 
 object ShareManager {
 
@@ -13,7 +12,12 @@ object ShareManager {
     private const val GMAIL_PACKAGE    = "com.google.android.gm"
 
     fun share(context: Context, file: IndexedFile, target: String?) {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", File(file.path))
+        val staged = ShareFileAccess.stageForProvider(context, file.path)
+        if (staged == null) {
+            Toast.makeText(context, context.getString(R.string.toast_cannot_open, file.name), Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri = ShareFileAccess.providerUri(context, staged)
         val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension) ?: "*/*"
 
         val send = Intent(Intent.ACTION_SEND).apply {

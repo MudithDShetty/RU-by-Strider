@@ -11,6 +11,8 @@ private const val TAG = "DatabaseHelper"
 private const val DB_NAME = "ru_index.db"
 private const val DB_VERSION = 6
 private const val FTS_TABLE = "fts_index"
+/** Debug rank tracking only — caps work when broad hints match many paths. */
+private const val MAX_TRACKED_HINT_PATHS = 8
 
 private enum class FtsMode { FTS5, FTS4, NONE }
 
@@ -72,25 +74,25 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         db.execSQL("CREATE INDEX idx_cats ON $TABLE ($COL_CATEGORIES)")
 
         createFtsTable(db)
-        Log.d(TAG, "Database created (FTS mode: $ftsMode)")
+        RuLog.d(TAG) { "Database created (FTS mode: $ftsMode)" }
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
             createFtsTable(db)
             db.execSQL("UPDATE $TABLE SET $COL_LAST_MODIFIED = 0")
-            Log.d(TAG, "DB upgraded to v2: FTS added ($ftsMode), all files queued for re-index")
+            RuLog.d(TAG) { "DB upgraded to v2: FTS added ($ftsMode), all files queued for re-index" }
         }
         if (oldVersion < 3) {
             db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_OWNER_NAMES TEXT")
             db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_OWNER_CONF REAL NOT NULL DEFAULT 0")
             db.execSQL("UPDATE $TABLE SET $COL_LAST_MODIFIED = 0")
-            Log.d(TAG, "DB upgraded to v3: owner_names added, all files queued for re-index")
+            RuLog.d(TAG) { "DB upgraded to v3: owner_names added, all files queued for re-index" }
         }
         if (oldVersion < 4) {
             db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_ENTITIES TEXT")
             db.execSQL("UPDATE $TABLE SET $COL_LAST_MODIFIED = 0")
-            Log.d(TAG, "DB upgraded to v4: entities column added, all files queued for re-index")
+            RuLog.d(TAG) { "DB upgraded to v4: entities column added, all files queued for re-index" }
         }
         if (oldVersion < 5) {
             db.execSQL(
@@ -101,11 +103,11 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
                     "WHERE $COL_EXT = 'pdf' AND (" +
                     "$COL_CONTENT_SNIP IS NULL OR LENGTH($COL_CONTENT_SNIP) < 30)"
             )
-            Log.d(TAG, "DB upgraded to v5: ocr_pending added, weak PDFs queued for OCR")
+            RuLog.d(TAG) { "DB upgraded to v5: ocr_pending added, weak PDFs queued for OCR" }
         }
         if (oldVersion < 6) {
             addHypEmbeddingColumnIfMissing(db)
-            Log.d(TAG, "DB upgraded to v6: hyp_embedding column (reserved, unused)")
+            RuLog.d(TAG) { "DB upgraded to v6: hyp_embedding column (reserved, unused)" }
         }
     }
 
@@ -136,7 +138,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
                 "path, keywords, notindexed=path, tokenize=unicode61)"
             )
             ftsMode = FtsMode.FTS4
-            Log.d(TAG, "Using FTS4 fallback for keyword search")
+            RuLog.d(TAG) { "Using FTS4 fallback for keyword search" }
         } catch (e: Exception) {
             ftsMode = FtsMode.NONE
             Log.w(TAG, "FTS unavailable — keyword search disabled: ${e.message}")
@@ -156,7 +158,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
 
     fun upsertFile(file: IndexedFile, ocrPending: Boolean = false) {
         if (BuildConfig.DEBUG) {
-            Log.d(TAG, "Upserting: ${file.path} | Metadata: ${file.metadata.metadataString}")
+            RuLog.d(TAG) { "Upserting: ${file.path} | Metadata: ${file.metadata.metadataString}" }
         }
         val db = writableDatabase
         val cv = ContentValues().apply {
@@ -219,17 +221,29 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
 
     /** Load all embeddings into RAM for fast dense scan (~1.5 KB per file). */
     fun warmEmbeddingCache() {
-        val dbCount = getTotalCount()
-        if (embeddingIndex.isWarm && embeddingIndex.cachedCount == dbCount) {
-            Log.d(TAG, "Embedding cache already warm ($dbCount vectors)")
+        if (EmbeddingGuardrails.isIndexingActive) {
+            RuLog.d(TAG) { "Skipping embedding cache warm — indexing active" }
+            return
+        }
+        if (!EmbeddingGuardrails.tryAcquireWarming()) {
+            RuLog.d(TAG) { "Skipping embedding cache warm — heavy work in progress" }
             return
         }
         try {
-            if (embeddingIndex.isWarm) embeddingIndex.clear()
-            embeddingIndex.loadFrom(this)
-        } catch (e: OutOfMemoryError) {
-            Log.e(TAG, "OOM warming embedding cache ($dbCount files)", e)
-            embeddingIndex.clear()
+            val dbCount = getTotalCount()
+            if (embeddingIndex.isWarm && embeddingIndex.cachedCount == dbCount) {
+                RuLog.d(TAG) { "Embedding cache already warm ($dbCount vectors)" }
+                return
+            }
+            try {
+                if (embeddingIndex.isWarm) embeddingIndex.clear()
+                embeddingIndex.loadFrom(this)
+            } catch (e: OutOfMemoryError) {
+                Log.e(TAG, "OOM warming embedding cache ($dbCount files)", e)
+                embeddingIndex.clear()
+            }
+        } finally {
+            EmbeddingGuardrails.releaseWarming()
         }
     }
 
@@ -372,6 +386,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
 
         val db = readableDatabase
         val paths = mutableListOf<String>()
+        val seen = HashSet<String>()
         val nameClauses = usable.map { "LOWER($COL_NAME) LIKE ?" }
         val nameArgs = usable.map { "%$it%" }.toMutableList()
 
@@ -389,7 +404,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             cursor.use {
                 while (it.moveToNext() && paths.size < limit) {
                     val path = it.getString(0)
-                    if (path !in paths) {
+                    if (seen.add(path)) {
                         paths.add(path)
                         added++
                     }
@@ -406,7 +421,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             runQuery(pathClauses.joinToString(" AND "), pathArgs)
         }
 
-        Log.d(TAG, "Filename token search (${usable.joinToString()}): ${paths.size} hits")
+        RuLog.d(TAG) { "Filename token search (${usable.joinToString()}): ${paths.size} hits" }
         return paths
     }
 
@@ -443,7 +458,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             }
         }
 
-        Log.d(TAG, "Content token search (${usable.joinToString()}): ${paths.size} hits")
+        RuLog.d(TAG) { "Content token search (${usable.joinToString()}): ${paths.size} hits" }
         return paths
     }
 
@@ -489,11 +504,26 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         }.toMap()
     }
 
-    fun loadStubsForPaths(paths: List<String>): List<IndexedFileStub> {
+    fun loadStubsForPaths(
+        paths: List<String>,
+        stubCache: MutableMap<String, IndexedFileStub>? = null
+    ): List<IndexedFileStub> {
         if (paths.isEmpty()) return emptyList()
-        val db = readableDatabase
+        val distinct = paths.distinct()
         val result = mutableListOf<IndexedFileStub>()
-        for (chunk in paths.distinct().chunked(900)) {
+        val toLoad = mutableListOf<String>()
+        for (path in distinct) {
+            val cached = stubCache?.get(path)
+            if (cached != null) {
+                result.add(cached)
+            } else {
+                toLoad.add(path)
+            }
+        }
+        if (toLoad.isEmpty()) return result
+
+        val db = readableDatabase
+        for (chunk in toLoad.chunked(900)) {
             val placeholders = chunk.joinToString(",") { "?" }
             val cursor = db.query(
                 TABLE,
@@ -509,11 +539,14 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             )
             cursor.use {
                 while (it.moveToNext()) {
-                    parseStubRow(it)?.let { stub -> result.add(stub) }
+                    parseStubRow(it)?.let { stub ->
+                        stubCache?.put(stub.path, stub)
+                        result.add(stub)
+                    }
                 }
             }
         }
-        Log.d(TAG, "Loaded ${result.size} stubs for ${paths.size} paths")
+        RuLog.d(TAG) { "Loaded ${result.size} stubs for ${paths.size} paths (${toLoad.size} from DB)" }
         return result
     }
 
@@ -562,9 +595,6 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         }
     }
 
-    fun scanAllEmbeddingsTopK(queryEmb: FloatArray, topK: Int = 50): List<Pair<String, Float>> =
-        scanAllEmbeddings(queryEmb, topK).top
-
     /**
      * Full-library dense scan with optional rank tracking for debug/diagnostics.
      * [trackNameHints] are matched case-insensitively against path and filename.
@@ -580,7 +610,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         if (embeddingIndex.isWarm) {
             val cached = embeddingIndex.scan(queryEmb, topK, trackNameHints)
             if (cached.totalScanned > 0) {
-                Log.d(TAG, "Dense scan (RAM cache): ${cached.totalScanned} files → top $topK")
+                RuLog.d(TAG) { "Dense scan (RAM cache): ${cached.totalScanned} files → top $topK" }
                 return cached
             }
         }
@@ -620,7 +650,10 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
                 for (i in queryEmb.indices) dot += queryEmb[i] * emb[i]
                 dot = dot.coerceIn(-1f, 1f)
 
-                if (pathMatchesHint(path)) {
+                if (pathMatchesHint(path) &&
+                    trackedScores.size < MAX_TRACKED_HINT_PATHS &&
+                    path !in trackedScores
+                ) {
                     trackedScores[path] = dot
                     higherCounts.putIfAbsent(path, 0)
                 }
@@ -642,8 +675,9 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
             )
         }.sortedBy { it.rank }
 
-        Log.d(TAG, "Full-library dense scan: $scanned files → top $topK, tracked ${tracked.size}")
-        return DenseScanResult(top.sortedByDescending { it.second }, tracked, scanned)
+        val topOut = if (top.size == topK) top else top.sortedByDescending { it.second }
+        RuLog.d(TAG) { "Full-library dense scan: $scanned files → top $topK, tracked ${tracked.size}" }
+        return DenseScanResult(topOut, tracked, scanned)
     }
 
     private fun insertTopKByScore(
@@ -666,10 +700,23 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
 
     fun loadEmbeddingsForPaths(paths: List<String>): Map<String, FloatArray> {
         if (paths.isEmpty()) return emptyMap()
-        val db = readableDatabase
+        val distinct = paths.distinct()
         val result = mutableMapOf<String, FloatArray>()
-        // SQLite limits bind args (~999); chunk large path lists
-        for (chunk in paths.distinct().chunked(900)) {
+        val missing = mutableListOf<String>()
+
+        if (embeddingIndex.isWarm) {
+            result.putAll(embeddingIndex.getEmbeddings(distinct))
+            for (path in distinct) {
+                if (path !in result) missing.add(path)
+            }
+        } else {
+            missing.addAll(distinct)
+        }
+
+        if (missing.isEmpty()) return result
+
+        val db = readableDatabase
+        for (chunk in missing.chunked(900)) {
             val placeholders = chunk.joinToString(",") { "?" }
             val cursor = db.query(
                 TABLE,
@@ -710,7 +757,29 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         val deleted = db.delete(TABLE, "$COL_PATH IN ($placeholders)", paths.toTypedArray())
         ftsDeletePaths(paths)
         embeddingIndex.remove(paths)
-        Log.d(TAG, "Deleted $deleted stale records from DB")
+        RuLog.d(TAG) { "Deleted $deleted stale records from DB" }
+    }
+
+    /** Keeps search index in sync after an on-device rename. */
+    fun renameIndexedPath(
+        oldPath: String,
+        newPath: String,
+        newName: String,
+        newExt: String,
+        lastModified: Long,
+    ) {
+        val cv = ContentValues().apply {
+            put(COL_PATH, newPath)
+            put(COL_NAME, newName)
+            put(COL_EXT, newExt)
+            put(COL_LAST_MODIFIED, lastModified)
+        }
+        val updated = writableDatabase.update(TABLE, cv, "$COL_PATH = ?", arrayOf(oldPath))
+        if (updated == 0) return
+        ftsDeletePaths(listOf(oldPath))
+        ftsInsert(newPath, newName.lowercase())
+        embeddingIndex.renamePath(oldPath, newPath)
+        RuLog.d(TAG) { "Renamed index entry $oldPath -> $newPath" }
     }
 
     fun getTotalCount(): Int {
@@ -725,6 +794,6 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
     /** Force all indexed files to be re-processed on next index run (e.g. after owner extraction upgrade). */
     fun invalidateAllForReindex() {
         writableDatabase.execSQL("UPDATE $TABLE SET $COL_LAST_MODIFIED = 0")
-        Log.d(TAG, "All files marked for re-index")
+        RuLog.d(TAG) { "All files marked for re-index" }
     }
 }

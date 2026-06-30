@@ -40,13 +40,16 @@
                 android:gravity="center"
                 android:clickable="true"
                 android:focusable="true"
-                android:background="?attr/selectableItemBackground">
+                android:minHeight="48dp"
+                android:contentDescription="@string/nav_home"
+                android:background="@drawable/bg_nav_tab_ripple_start">
                 <ImageView
                     android:id="@+id/navHomeIcon"
                     android:layout_width="@dimen/ru_nav_icon_size"
                     android:layout_height="@dimen/ru_nav_icon_size"
                     android:scaleType="centerInside"
                     android:src="@drawable/ic_home"
+                    android:importantForAccessibility="no"
                     app:tint="@color/nav_tab_icon"/>
                 <TextView
                     android:id="@+id/navHomeLabel"
@@ -54,7 +57,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:text="@string/nav_home"/>
+                    android:text="@string/nav_home"
+                    android:importantForAccessibility="no"/>
             </LinearLayout>
 
             <LinearLayout
@@ -66,13 +70,16 @@
                 android:gravity="center"
                 android:clickable="true"
                 android:focusable="true"
-                android:background="?attr/selectableItemBackground">
+                android:minHeight="48dp"
+                android:contentDescription="@string/nav_index"
+                android:background="@drawable/bg_nav_tab_ripple_middle">
                 <ImageView
                     android:id="@+id/navIndexIcon"
                     android:layout_width="@dimen/ru_nav_icon_size"
                     android:layout_height="@dimen/ru_nav_icon_size"
                     android:scaleType="centerInside"
                     android:src="@drawable/ic_index"
+                    android:importantForAccessibility="no"
                     app:tint="@color/nav_tab_icon"/>
                 <TextView
                     android:id="@+id/navIndexLabel"
@@ -80,7 +87,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:text="@string/nav_index"/>
+                    android:text="@string/nav_index"
+                    android:importantForAccessibility="no"/>
             </LinearLayout>
 
             <LinearLayout
@@ -92,13 +100,16 @@
                 android:gravity="center"
                 android:clickable="true"
                 android:focusable="true"
+                android:minHeight="48dp"
                 android:visibility="gone"
-                android:background="?attr/selectableItemBackground">
+                android:contentDescription="@string/nav_analytics"
+                android:background="@drawable/bg_nav_tab_ripple_middle">
                 <ImageView
                     android:id="@+id/navAnalyticsIcon"
                     android:layout_width="22dp"
                     android:layout_height="22dp"
                     android:src="@drawable/ic_analytics"
+                    android:importantForAccessibility="no"
                     app:tint="@color/nav_tab_icon"/>
                 <TextView
                     android:id="@+id/navAnalyticsLabel"
@@ -106,7 +117,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:text="@string/nav_analytics"/>
+                    android:text="@string/nav_analytics"
+                    android:importantForAccessibility="no"/>
             </LinearLayout>
 
             <LinearLayout
@@ -118,13 +130,16 @@
                 android:gravity="center"
                 android:clickable="true"
                 android:focusable="true"
-                android:background="?attr/selectableItemBackground">
+                android:minHeight="48dp"
+                android:contentDescription="@string/nav_settings"
+                android:background="@drawable/bg_nav_tab_ripple_end">
                 <ImageView
                     android:id="@+id/navSettingsIcon"
                     android:layout_width="@dimen/ru_nav_icon_size"
                     android:layout_height="@dimen/ru_nav_icon_size"
                     android:scaleType="centerInside"
                     android:src="@drawable/ic_settings"
+                    android:importantForAccessibility="no"
                     app:tint="@color/nav_tab_icon"/>
                 <TextView
                     android:id="@+id/navSettingsLabel"
@@ -132,7 +147,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:text="@string/nav_settings"/>
+                    android:text="@string/nav_settings"
+                    android:importantForAccessibility="no"/>
             </LinearLayout>
         </LinearLayout>
     </FrameLayout>
@@ -172,89 +188,21 @@
                     android:paddingStart="30dp"
                     android:paddingEnd="30dp">
 
-                <TextView
-                    android:id="@+id/tvOnboardingWordmark"
-                    style="@style/RuText.Wordmark"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"/>
+                <ImageView
+                    android:id="@+id/ivOnboardingWordmark"
+                    android:layout_width="@dimen/onboarding_brand_logo_size"
+                    android:layout_height="@dimen/onboarding_brand_logo_size"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ru_brand_logo"
+                    android:contentDescription="@string/app_name"/>
 
-                <!-- First-run model setup — inline card, not a separate scrim overlay -->
+                <!-- Step 1: name -->
                 <LinearLayout
-                    android:id="@+id/llOnboardingSetup"
+                    android:id="@+id/onboardingStepName"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="32dp"
                     android:orientation="vertical"
-                    android:paddingStart="20dp"
-                    android:paddingEnd="20dp"
-                    android:paddingTop="18dp"
-                    android:paddingBottom="18dp"
-                    android:background="@drawable/bg_onboarding_setup_card"
-                    android:visibility="gone">
-
-                    <TextView
-                        style="@style/RuText.SectionHeader"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/onboarding_setup_label"/>
-
-                    <TextView
-                        android:id="@+id/tvOnboardingSetupTitle"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/onboarding_setup_title"
-                        android:textSize="18sp"
-                        android:textColor="@color/text_primary"
-                        android:fontFamily="@font/fraunces_semibold"
-                        android:gravity="center"/>
-
-                    <TextView
-                        android:id="@+id/tvOnboardingSetupMessage"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/status_first_load"
-                        android:textSize="14sp"
-                        android:textColor="@color/text_primary"
-                        android:fontFamily="@font/hanken_grotesk_medium"
-                        android:gravity="center"/>
-
-                    <ProgressBar
-                        android:id="@+id/onboardingSetupProgressBar"
-                        style="?android:attr/progressBarStyleHorizontal"
-                        android:layout_width="match_parent"
-                        android:layout_height="6dp"
-                        android:layout_marginTop="14dp"
-                        android:max="100"
-                        android:progress="0"
-                        android:progressTint="@color/ru_crimson"
-                        android:progressBackgroundTint="@color/ru_crimson_light"/>
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="@string/onboarding_setup_sub"
-                        android:textSize="12sp"
-                        android:textColor="@color/text_secondary"
-                        android:fontFamily="@font/hanken_grotesk_regular"
-                        android:lineSpacingMultiplier="1.45"
-                        android:gravity="center"/>
-
-                    <TextView
-                        android:id="@+id/btnOnboardingSetupRetry"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="center_horizontal"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/onboarding_setup_retry"
-                        android:textSize="14sp"
-                        android:textColor="@color/ru_crimson"
-                        android:fontFamily="@font/hanken_grotesk_medium"
-                        android:padding="8dp"
-                        android:visibility="gone"/>
-                </LinearLayout>
+                    android:gravity="center_horizontal">
 
                 <TextView
                     android:id="@+id/tvOnboardingTitle"
@@ -322,12 +270,308 @@
 
                 </LinearLayout>
 
+                <!-- Step 2: index + permission rationale -->
+                <LinearLayout
+                    android:id="@+id/onboardingStepIndex"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal"
+                    android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tvOnboardingIndexTitle"
+                    style="@style/RuText.OnboardingTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="40dp"
+                    android:text="@string/onboarding_index_title"
+                    android:gravity="center"/>
+
+                <TextView
+                    android:id="@+id/tvOnboardingIndexSub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="12dp"
+                    android:maxWidth="@dimen/onboarding_content_max_width"
+                    android:text="@string/onboarding_index_sub"
+                    android:textSize="13.5sp"
+                    android:textColor="@color/text_secondary"
+                    android:lineSpacingMultiplier="1.55"
+                    android:fontFamily="@font/hanken_grotesk_regular"
+                    android:gravity="center"/>
+
+                <include
+                    layout="@layout/layout_onboarding_perm_bullets"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="24dp"
+                    android:maxWidth="@dimen/onboarding_content_max_width"/>
+
+                <TextView
+                    android:id="@+id/tvOnboardingPermDenied"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/onboarding_perm_denied_title"
+                    android:textSize="13.5sp"
+                    android:textColor="@color/ru_crimson"
+                    android:lineSpacingMultiplier="1.45"
+                    android:fontFamily="@font/hanken_grotesk_medium"
+                    android:gravity="center"
+                    android:visibility="gone"/>
+
+                <LinearLayout
+                    android:id="@+id/llOnboardingPermRecovery"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/btnOnboardingPermTryAgain"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/onboarding_perm_try_again"
+                        android:textSize="14sp"
+                        android:textColor="@color/ru_crimson"
+                        android:fontFamily="@font/hanken_grotesk_medium"
+                        android:padding="8dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="?attr/selectableItemBackgroundBorderless"/>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="·"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_secondary"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"/>
+
+                    <TextView
+                        android:id="@+id/btnOnboardingPermSettings"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/onboarding_perm_open_settings"
+                        android:textSize="14sp"
+                        android:textColor="@color/ru_crimson"
+                        android:fontFamily="@font/hanken_grotesk_medium"
+                        android:padding="8dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="?attr/selectableItemBackgroundBorderless"/>
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvOnboardingIndexStarted"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/onboarding_index_started_sub"
+                    android:textSize="13.5sp"
+                    android:textColor="@color/text_secondary"
+                    android:lineSpacingMultiplier="1.45"
+                    android:fontFamily="@font/hanken_grotesk_regular"
+                    android:gravity="center"
+                    android:visibility="gone"/>
+
+                <TextView
+                    android:id="@+id/btnOnboardingGrantStart"
+                    style="@style/RuText.Button"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="24dp"
+                    android:gravity="center"
+                    android:text="@string/onboarding_index_grant_start"
+                    android:background="@drawable/bg_btn_primary"
+                    android:clickable="true"
+                    android:focusable="true"/>
+
+                <TextView
+                    android:id="@+id/btnOnboardingContinue"
+                    style="@style/RuText.Button"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="24dp"
+                    android:gravity="center"
+                    android:text="@string/onboarding_index_continue"
+                    android:background="@drawable/bg_btn_primary"
+                    android:alpha="0.45"
+                    android:enabled="false"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:visibility="gone"/>
+
+                </LinearLayout>
+
+                </LinearLayout>
+
                 <Space
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"/>
             </LinearLayout>
         </ScrollView>
+    </FrameLayout>
+
+    <!-- Model warm-up — full-screen loading (handoff screen 02) -->
+    <FrameLayout
+        android:id="@+id/modelLoadingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/ru_bg"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone"
+        android:elevation="18dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center_horizontal">
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"/>
+
+            <ImageView
+                android:id="@+id/ivModelLoadingMark"
+                android:layout_width="@dimen/model_loading_logo_size"
+                android:layout_height="@dimen/model_loading_logo_size"
+                android:contentDescription="@string/app_name"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ru_brand_logo"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/model_loading_logo_title_gap"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:paddingStart="40dp"
+                android:paddingEnd="40dp">
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/model_loading_title_height">
+
+                    <TextView
+                        android:id="@+id/tvModelLoadingTitleHi"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:text="@string/model_loading_hi"
+                        android:textSize="21sp"
+                        android:textColor="@color/text_primary"
+                        android:fontFamily="@font/tiro_devanagari_hindi_regular"
+                        android:includeFontPadding="false"/>
+
+                    <TextView
+                        android:id="@+id/tvModelLoadingTitleEn"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:text="@string/model_loading_en"
+                        android:textSize="25sp"
+                        android:textColor="@color/text_primary"
+                        android:fontFamily="@font/fraunces_semibold"
+                        android:includeFontPadding="false"
+                        android:alpha="0"/>
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/tvModelLoadingWait"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/model_loading_title_subline_gap"
+                    android:text="@string/model_loading_wait"
+                    android:textSize="15sp"
+                    android:textColor="@color/text_secondary"
+                    android:fontFamily="@font/hanken_grotesk_regular"/>
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/model_loading_subline_track_gap">
+
+                    <ProgressBar
+                        android:id="@+id/modelLoadingProgressBar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="@dimen/model_loading_track_max_width"
+                        android:layout_height="@dimen/model_loading_track_height"
+                        android:layout_gravity="center_horizontal"
+                        android:max="100"
+                        android:progress="0"
+                        android:progressDrawable="@drawable/bg_model_loading_progress"
+                        android:indeterminate="false"/>
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/tvModelLoadingPercent"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/model_loading_track_percent_gap"
+                    android:text="0%"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_secondary"
+                    android:fontFamily="@font/hanken_grotesk_semibold"
+                    android:fontFeatureSettings="tnum"
+                    android:letterSpacing="0"/>
+
+                <TextView
+                    android:id="@+id/btnModelLoadingRetry"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/onboarding_setup_retry"
+                    android:textSize="14sp"
+                    android:textColor="@color/ru_crimson"
+                    android:fontFamily="@font/hanken_grotesk_medium"
+                    android:padding="8dp"
+                    android:visibility="gone"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="?attr/selectableItemBackgroundBorderless"/>
+            </LinearLayout>
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"/>
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- Brand splash — horizontal ru wordmark (transparent-image.png) -->
+    <FrameLayout
+        android:id="@+id/splashOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/ru_bg"
+        android:paddingStart="@dimen/splash_logo_padding_h"
+        android:paddingEnd="@dimen/splash_logo_padding_h"
+        android:clickable="true"
+        android:focusable="true"
+        android:elevation="19dp">
+
+        <ImageView
+            android:id="@+id/ivSplashWordmark"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:adjustViewBounds="true"
+            android:maxWidth="@dimen/splash_logo_max_width"
+            android:maxHeight="@dimen/splash_logo_max_height"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ru_splash_wordmark"
+            android:contentDescription="@string/app_name"/>
     </FrameLayout>
 
     <!-- Toast snackbar -->
@@ -355,7 +599,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:textColor="#FFFFFF"
+            android:textColor="@android:color/white"
             android:textSize="14sp"
             android:fontFamily="sans-serif-medium"/>
     </LinearLayout>

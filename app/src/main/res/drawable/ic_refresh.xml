@@ -3,16 +3,17 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+    <!-- Clockwise arc with gap at ~1 o'clock; arrow follows the circle tangent -->
     <path
         android:fillColor="@android:color/transparent"
-        android:pathData="M21,12 A9,9 0 1,1 12,3"
+        android:pathData="M17,7.3 A7,7 0 1,1 13.8,5.2"
         android:strokeColor="#FF000000"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:strokeWidth="1.8"/>
     <path
         android:fillColor="@android:color/transparent"
-        android:pathData="M21,3 V9 H15"
+        android:pathData="M17,7.3 L19.4,9.9 M17,7.3 L14.6,9.9"
         android:strokeColor="#FF000000"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"

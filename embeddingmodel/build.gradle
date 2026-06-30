@@ -10,9 +10,9 @@ assetPack {
 }
 
 def modelSources = [
+    file("${rootProject.projectDir}/model_assets/onnx/model_int8.onnx"),
     file("${rootProject.projectDir}/app/src/debug/assets/embedding_model.onnx"),
-    file("${rootProject.projectDir}/app/src/main/assets/embedding_model.onnx"),
-    file("${rootProject.projectDir}/model_assets/onnx/model.onnx"),
+    file("${rootProject.projectDir}/embeddingmodel/src/main/assets/embedding_model.onnx"),
 ]
 def modelSource = modelSources.find { it.exists() }
 def modelDestDir = file("src/main/assets")
@@ -20,8 +20,8 @@ def modelDest = file("${modelDestDir}/embedding_model.onnx")
 
 tasks.register("syncModelAsset") {
     doLast {
-        if (!modelSource.exists()) {
-            logger.warn("embedding_model.onnx not found at ${modelSource.path} — asset pack will be empty until model is copied")
+        if (modelSource == null) {
+            logger.warn("embedding_model.onnx not found — asset pack will be empty until model is copied")
             return
         }
         modelDestDir.mkdirs()

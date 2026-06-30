@@ -720,18 +720,32 @@ Entities stored in `entities` column (comma-separated, lowercase) and included i
 | **Layers / heads** | 12 / 12 |
 | **Vocab size** | 180,000 (BPE) |
 | **Output** | Mean-pooled, L2-normalized 384-dim vector |
-| **ONNX asset** | Play Asset Delivery fast-follow pack `embeddingmodel` (~390 MB); debug fallback in `app/src/debug/assets/` |
+| **Primary ONNX** | INT8 `embedding_model.onnx` (~100 MB) via Play Asset Delivery fast-follow pack `embeddingmodel` |
+| **Fallback ONNX** | FP32 `embedding_model_fp32.onnx` (~390 MB) via on-demand pack `embeddingmodel_fp32` — fetched only when quality probe or golden eval requires it |
+| **Model version** | `BuildConfig.MODEL_VERSION = 3` — bump triggers re-download and force re-index |
 | **Tokenizer** | `tokenizer.json` + `tokenizer_config.json` |
+
+### INT8 + NNAPI backend ladder
+
+At init, `EmbeddingBackendSelector` probes (arm64 only):
+
+1. **INT8_NNAPI** — calibrated INT8 with NNAPI EP when faster than CPU and no prior native crash
+2. **INT8_CPU** — INT8 on ORT CPU with `ALL_OPT`
+3. **FP32_CPU** — full-precision fallback when INT8 fails quality probe or after max backend escalations
+
+Runtime guardrails (`EmbeddingGuardrails.kt`): adaptive batch size from free RAM, thermal cooldown every 4 batches during bulk index, heavy-work mutex (index/OCR/warm), crash hint skips NNAPI on next launch, max 2 backend escalations per session.
+
+Offline quantization scripts live in `model_assets/quantize/` (dynamic → static QDQ S8S8 → usability checker). See `DECISION_LOG.md` for gate results.
 
 ### Inference Parameters
 
 | Parameter | Indexing | Search query |
 |-----------|----------|--------------|
-| Sequence length | 64 (`MAX_SEQ_LEN_SHORT`) | 128 (`FIXED_SEQ_LEN`) |
-| Batch size | 8 | 1 |
-| ONNX threads | 2 intra-op, 1 inter-op | same |
-| Optimization | `BASIC_OPT` | same |
-| Batch cooldown | 40 ms between batches | — |
+| Sequence length | 96 (`MAX_SEQ_LEN_SHORT`) | 128 (`FIXED_SEQ_LEN`) |
+| Batch size | 16 default (8/4 under memory pressure) | 1 |
+| ONNX threads | 4 intra during index (2 in power-save); 2 intra for search | same |
+| Optimization | `ALL_OPT` | same |
+| Batch cooldown | 20 ms every 4 batches (40 ms in power-save) | — |
 
 ### Pooling & Similarity
 
@@ -873,10 +887,14 @@ All retrieval constants live in `SearchWeights.kt`. Change values only after gol
 
 ```text
 StriderQuanto/
-├── embeddingmodel/                      # Play Asset Delivery fast-follow pack (~390 MB ONNX)
+├── embeddingmodel/                      # Play Asset Delivery fast-follow pack (~100 MB INT8 ONNX)
 │   ├── build.gradle
 │   └── src/main/assets/
 │       └── embedding_model.onnx         # Synced at build from model_assets/ (not in git)
+├── embeddingmodel_fp32/                 # Play Asset Delivery on-demand pack (~390 MB FP32 ONNX)
+│   ├── build.gradle
+│   └── src/main/assets/
+│       └── embedding_model_fp32.onnx    # Synced at build from model_assets/ (not in git)
 ├── app/
 │   ├── build.gradle                     # assetPacks, Play Core, MODEL_BYTES BuildConfig
 │   └── src/
@@ -1025,7 +1043,7 @@ Connect a device via USB (USB debugging enabled) or use an emulator with shared 
 ### 4. First Run Checklist
 
 1. **Grant storage permission** — on Android 11+, enable "All files access" when prompted (`MANAGE_EXTERNAL_STORAGE`).
-2. **Wait for model setup** — first launch downloads ~390 MB via Play Asset Delivery (or copies bundled model in debug). Progress shown in onboarding setup card. You can browse Settings/onboarding while setup runs.
+2. **Wait for model setup** — first launch downloads ~100 MB INT8 model via Play Asset Delivery fast-follow (or copies bundled model in debug). FP32 (~390 MB) downloads on-demand only if quality escalation requires it. Progress shown in onboarding setup card.
 3. **Set your name** (optional) — improves *"my Aadhaar"*, *"mera PAN"* style queries. Stored locally only.
 4. **Tap "Index"** — background indexing starts with a persistent notification. You may close the app; WorkManager continues.
 5. **Search** — type naturally; results update as you type using the full hybrid pipeline. No need to press Search.
@@ -1038,17 +1056,29 @@ Play Asset Delivery **only works when the app is installed from Google Play**, n
 1. Build release AAB: `./gradlew bundleRelease`
 2. Upload `app/build/outputs/bundle/release/app-release.aab` to **Play Console → Internal testing**
 3. Install from the Play Store test link on a physical device
-4. Confirm Play listing shows ~35 MB install size; fast-follow downloads the model pack after install
+4. Confirm Play listing shows ~25–35 MB base install size; fast-follow downloads ~100 MB INT8 model pack after install
 5. Open Ru — setup card shows download progress if the pack is not yet local
 6. Second launch — model in `filesDir`; engine ready in <1 s
 
-**Regression checklist (golden queries, same FP32 model):**
+**Regression checklist (golden queries, INT8 primary + on-demand FP32 fallback):**
 
 | Query | Expected | Pass? |
 |-------|----------|-------|
 | `nda quantoo` | `NDA- Quantoo .pdf` at #1 | |
 | `Tanuj` | NDA in top 3 | |
 | `Nikharv` | NDA in top 3 | |
+
+**Release build checks (2+ arm64 devices before wide release):**
+
+| Check | Pass criteria |
+|-------|---------------|
+| Cold start | Setup completes; logcat shows INT8 model ~97858099 bytes |
+| Backend | `int8_cpu` on release (not `int8_nnapi`) |
+| Full index | Completes without native crash on ~18k+ files |
+| FP32 on-demand | Force quality escalation → on-demand pack downloads → re-index works |
+| R8 release | No ProGuard crash on index/search/OCR |
+
+See [`model_assets/quantize/STABILITY_MATRIX.md`](model_assets/quantize/STABILITY_MATRIX.md) for full device matrix.
 
 Compare search latency in logcat (`SearchPipeline`, `EmbeddingEngine`) before vs after PAD — should match pre-PAD builds once the model is local.
 
@@ -1076,15 +1106,19 @@ adb logcat -s ModelAssetDelivery StriderApp EmbeddingEngine SearchPipeline
 
 | Constant | Location | Value |
 |----------|----------|-------|
-| `BATCH_SIZE` | `FileIndexer` | 8 |
+| `BATCH_SIZE_DEFAULT` | `FileIndexer` | 16 (adaptive 8/4 via `MemoryProbe`) |
+| `MODEL_VERSION` | `BuildConfig` | 3 (INT8 primary + on-demand FP32) |
+| `PROBE_NNAPI` | `BuildConfig` | true (debug) / false (release) |
 | `MAX_FILES` | `FileIndexer` | 5000 |
 | `MAX_SEQ_LEN_SHORT` | `EmbeddingEngine` | 64 |
 | `FIXED_SEQ_LEN` | `EmbeddingEngine` | 128 |
 | `EMBEDDING_DIM` | `EmbeddingEngine` | 384 |
+| `MAX_BACKEND_ESCALATIONS` | `EmbeddingGuardrails` | 2 |
 | `RRF_K` | `SearchWeights` | 60 |
 | `LEXICAL_RRF_WEIGHT` | `SearchWeights` | 1.5 |
 | `EVAL_LOGGING` | `BuildConfig` | true (debug) / false (release) |
 | `OCR_STARTUP_DEFER_MS` | `StriderApp` | 90,000 (90s) |
+| Release ABI | `app/build.gradle` | `arm64-v8a` only (NNAPI safety) |
 
 ### RetrievalScaling Reference (at 24k files)
 
@@ -1106,7 +1140,7 @@ Benchmarks below are **engineering targets and measured estimates** from develop
 
 | Scenario | Time | Notes |
 |----------|------|-------|
-| First install — model download + session create | **1–5 min download** + **4–8 s load** | One-time; Play fast-follow + setup card progress |
+| First install — model download + session create | **1–3 min download (~100 MB)** + **4–8 s load** | One-time; Play fast-follow INT8 + setup card progress |
 | First install (debug sideload) — bundled copy | **4–8 s** | Debug fallback copies from APK assets |
 | Subsequent app opens | **< 1 s to ready** | Session persists in `StriderApp` process |
 | Embedding cache warm (24k files) | **~2–5 s** | Parallel with model load on startup |
@@ -1128,7 +1162,8 @@ Benchmarks below are **engineering targets and measured estimates** from develop
 | Index 1,000 files | ~10 min | **60–90 s** |
 | Re-index unchanged corpus | ~10 min | **< 10 s** |
 | Index 500 files (typical) | — | **~1–3 min** |
-| Index 24,000 files | — | **~15–25 min** (with cache warm) |
+| Index 24,000 files (INT8 + batch 16) | — | **~6–10 min** embedding phase (target) |
+| Index 24,000 files (FP32 baseline) | — | **~15–25 min** (with cache warm) |
 
 ### Search Latency
 
@@ -1146,7 +1181,7 @@ Benchmarks below are **engineering targets and measured estimates** from develop
 
 | Resource | Value |
 |----------|-------|
-| Model size on disk | ~390 MB |
+| Model size on disk (INT8) | ~98 MB (+ ~390 MB FP32 only if on-demand fallback triggered) |
 | Embedding RAM cache (24k) | ~37 MB |
 | Per-file embedding storage | 1,536 bytes (384 × float32) |
 | ONNX thread count | 2 intra-op / 1 inter-op |

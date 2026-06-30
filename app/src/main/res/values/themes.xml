@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <style name="Theme.StriderQuanto.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ru_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ru_splash_icon_inset</item>
+        <item name="windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+        <item name="postSplashScreenTheme">@style/Theme.StriderQuanto</item>
+        <item name="android:windowBackground">@color/ru_bg</item>
+        <item name="android:statusBarColor">@color/ru_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
     <style name="Theme.StriderQuanto" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/ru_crimson</item>
         <item name="colorPrimaryVariant">@color/ru_dark</item>
@@ -8,9 +18,11 @@
         <item name="android:windowBackground">@color/ru_bg</item>
         <item name="android:statusBarColor">@color/ru_bg</item>
         <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/ru_bg</item>
         <item name="android:forceDarkAllowed">false</item>
         <item name="android:fontFamily">@font/hanken_grotesk</item>
         <item name="switchStyle">@style/RuSwitch</item>
+        <item name="popupMenuStyle">@style/RuPopupMenu</item>
     </style>
 
     <style name="RuSwitch" parent="Widget.MaterialComponents.CompoundButton.Switch">
@@ -106,6 +118,14 @@
         <item name="android:paddingBottom">12dp</item>
         <item name="android:stateListAnimator">@null</item>
         <item name="cornerRadius">26dp</item>
+    </style>
+
+    <style name="RuPopupMenu" parent="Widget.AppCompat.PopupMenu">
+        <item name="android:popupBackground">@drawable/bg_result_actions_menu</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">@dimen/result_menu_text_size</item>
+        <item name="android:listPreferredItemHeightSmall">@dimen/result_menu_item_height</item>
+        <item name="android:listPreferredItemHeight">@dimen/result_menu_item_height</item>
     </style>
 
     <style name="RuChip" parent="Widget.MaterialComponents.Chip.Filter">

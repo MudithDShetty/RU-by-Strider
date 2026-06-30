@@ -3,16 +3,17 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+    <!-- 8-tooth cog with center hole (outline) -->
     <path
         android:fillColor="@android:color/transparent"
-        android:pathData="M12,9 A3,3 0 1,1 12,15 A3,3 0 1,1 12,9"
+        android:pathData="M20,12 L17.54,14.3 L17.66,17.66 L14.3,17.54 L12,20 L9.7,17.54 L6.34,17.66 L6.46,14.3 L4,12 L6.46,9.7 L6.34,6.34 L9.7,6.46 L12,4 L14.3,6.46 L17.66,6.34 L17.54,9.7 Z"
         android:strokeColor="#FF000000"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:strokeWidth="1.8"/>
     <path
         android:fillColor="@android:color/transparent"
-        android:pathData="M12,2 L12,4 M12,20 L12,22 M4.22,4.22 L5.64,5.64 M18.36,18.36 L19.78,19.78 M2,12 L4,12 M20,12 L22,12 M4.22,19.78 L5.64,18.36 M18.36,5.64 L19.78,4.22"
+        android:pathData="M12,9.3 A2.7,2.7 0 1,1 12,14.7 A2.7,2.7 0 1,1 12,9.3"
         android:strokeColor="#FF000000"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"

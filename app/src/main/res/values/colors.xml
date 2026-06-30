@@ -2,8 +2,9 @@
 <resources>
     <!-- RU Brand -->
     <color name="ru_bg">#FEF9E6</color>
-    <color name="ru_crimson">#C41E3A</color>
-    <color name="ru_crimson_light">#F5E6E9</color>
+    <color name="launcher_icon_bg">#FCF5E4</color>
+    <color name="ru_crimson">#E8455C</color>
+    <color name="ru_crimson_light">#FDEAEE</color>
     <color name="ru_dark">#1A1530</color>
     <color name="ru_teal">#0D9E76</color>
     <color name="ru_amber">#8B6200</color>
@@ -26,8 +27,8 @@
     <color name="ru_nav_bar_fill">#E0FFFFFF</color>
     <color name="ru_loading_scrim">#CCF5EDE8</color>
     <color name="ru_skeleton_fill">#12000000</color>
-    <color name="ru_mic_breathe">#1AC41E3A</color>
-    <color name="ru_focus_ring">#38C41E3A</color>
+    <color name="ru_mic_breathe">#1AE8455C</color>
+    <color name="ru_focus_ring">#38E8455C</color>
     <color name="ru_settings_icon_bg">#0D000000</color>
     <color name="ru_init_banner">#F5EDE8</color>
     <color name="ru_theme_toggle_shadow">#47000000</color>
@@ -37,27 +38,28 @@
     <color name="theme_toggle_icon_active">#1A1530</color>
     <color name="ru_chip_fill">#0D000000</color>
     <color name="ru_result_row_shadow">#14785614</color>
-    <color name="ru_crimson_accent_deep">#A81830</color>
+    <color name="ru_crimson_accent_deep">#C73048</color>
 
     <!-- Category colors -->
     <color name="cat_work">#3B65DC</color>
-    <color name="cat_identity">#C41E3A</color>
+    <color name="cat_identity">#E8455C</color>
     <color name="cat_education">#8B6200</color>
     <color name="cat_personal">#0D9E76</color>
     <color name="cat_media">#7C3AED</color>
     <color name="cat_general">#888888</color>
 
     <!-- Extension badge backgrounds -->
-    <color name="ext_pdf">#DC3545</color>
+    <color name="ext_pdf">#E8455C</color>
     <color name="ext_doc">#2B579A</color>
     <color name="ext_xls">#217346</color>
-    <color name="ext_ppt">#D24726</color>
-    <color name="ext_img">#0D9E76</color>
-    <color name="ext_audio">#7C3AED</color>
-    <color name="ext_video">#E67E22</color>
+    <color name="ext_ppt">#C49200</color>
+    <color name="ext_media">#7C3AED</color>
+    <color name="ext_img">@color/ext_media</color>
+    <color name="ext_audio">@color/ext_media</color>
+    <color name="ext_video">@color/ext_media</color>
     <color name="ext_code">#1A1530</color>
     <color name="ext_zip">#888888</color>
-    <color name="ext_default">#C41E3A</color>
+    <color name="ext_default">#E8455C</color>
 
     <!-- Legacy Material (keep for compatibility) -->
     <color name="accent">@color/ru_crimson</color>
