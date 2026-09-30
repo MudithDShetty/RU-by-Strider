@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- RU Brand -->
+    <!-- Ru Brand -->
     <color name="ru_bg">#FEF9E6</color>
     <color name="launcher_icon_bg">#FCF5E4</color>
     <color name="ru_crimson">#E8455C</color>
@@ -39,6 +39,9 @@
     <color name="ru_chip_fill">#0D000000</color>
     <color name="ru_result_row_shadow">#14785614</color>
     <color name="ru_crimson_accent_deep">#C73048</color>
+    <color name="toast_bg">@color/surface_solid</color>
+    <color name="toast_text">@color/text_primary</color>
+    <color name="toast_stroke">@color/divider</color>
 
     <!-- Category colors -->
     <color name="cat_work">#3B65DC</color>

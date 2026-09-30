@@ -56,4 +56,8 @@
 
     <color name="badge_bg">#2A1518</color>
     <color name="badge_text">#E8455C</color>
+
+    <color name="toast_bg">@color/surface_solid</color>
+    <color name="toast_text">@color/text_primary</color>
+    <color name="toast_stroke">@color/divider</color>
 </resources>

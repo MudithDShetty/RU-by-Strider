@@ -1,10 +1,10 @@
 -keep class ai.onnxruntime.** { *; }
 
 # App entry points and generated bindings
--keep class com.strider.quanto.BuildConfig { *; }
--keep class com.strider.quanto.StriderApp { *; }
--keep class com.strider.quanto.MainActivity { *; }
--keep class com.strider.quanto.databinding.** { *; }
+-keep class com.strider.ru.BuildConfig { *; }
+-keep class com.strider.ru.StriderApp { *; }
+-keep class com.strider.ru.MainActivity { *; }
+-keep class com.strider.ru.databinding.** { *; }
 
 -keepattributes Signature
 -keepattributes *Annotation*

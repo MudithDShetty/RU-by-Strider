@@ -6,8 +6,6 @@
         <exclude domain="file" path="embedding_model_fp32.onnx" />
         <exclude domain="file" path="ru_eval" />
         <exclude domain="sharedpref" path="strider_quanto_prefs.xml" />
-        <exclude domain="cache" path="thumbnails" />
-        <exclude domain="cache" path="share" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="database" path="ru_index.db" />
@@ -15,7 +13,5 @@
         <exclude domain="file" path="embedding_model_fp32.onnx" />
         <exclude domain="file" path="ru_eval" />
         <exclude domain="sharedpref" path="strider_quanto_prefs.xml" />
-        <exclude domain="cache" path="thumbnails" />
-        <exclude domain="cache" path="share" />
     </device-transfer>
 </data-extraction-rules>

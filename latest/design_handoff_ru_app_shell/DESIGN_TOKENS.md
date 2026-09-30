@@ -1,4 +1,4 @@
-# RU App Shell — Design Tokens (condensed)
+# Ru App Shell — Design Tokens (condensed)
 
 All map to **existing** `res/values/colors.xml` / `strings.xml`. Reference resources; don't hardcode.
 

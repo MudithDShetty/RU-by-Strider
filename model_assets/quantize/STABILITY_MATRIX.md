@@ -17,13 +17,13 @@ Run on **two arm64 devices** before release merge. All runs must complete withou
 
 ```bash
 adb logcat -s EmbeddingEngine EmbeddingBackend EmbeddingGuardrails FileIndexer ModelAssetDelivery
-adb shell run-as com.strider.quanto cat shared_prefs/strider_quanto.xml
+adb shell run-as com.strider.ru cat shared_prefs/strider_quanto.xml
 ```
 
 ## Eval export
 
 ```bash
-adb pull /data/data/com.strider.quanto/files/ru_eval ./analytics_data
+adb pull /data/data/com.strider.ru/files/ru_eval ./analytics_data
 ```
 
 Record pass/fail per device in this file after each run.

@@ -1,7 +1,7 @@
-# Handoff: RU — App Shell (Navigation · Index · Settings · Onboarding)
+# Handoff: Ru — App Shell (Navigation · Index · Settings · Onboarding)
 
 ## Overview
-This package specifies the redesigned **app shell** for RU (Strider Quanto) — the on-device, multilingual semantic file-search Android app. It covers four things layered on top of the existing Home/search screen:
+This package specifies the redesigned **app shell** for Ru (Strider Quanto) — the on-device, multilingual semantic file-search Android app. It covers four things layered on top of the existing Home/search screen:
 
 1. A **bottom tab bar** (Home · Index · Settings)
 2. The **Index screen** (scan device → build the semantic index, with a progress dial and category buckets)
@@ -13,7 +13,7 @@ The Home screen, search, and results sheet already exist in both the prototype a
 ## About the Design Files
 The file in this bundle — **`Ru - App.html`** — is a **design reference created in HTML**. It is a high-fidelity prototype that demonstrates the intended **look, spacing, copy, and interaction behavior**. It is **not production code to copy**.
 
-The task is to **recreate these designs in the existing Android codebase** (`RU-by-Strider/`, package `com.strider.quanto`, Kotlin + Android Views/XML + Material Components) using its established patterns — Fragments, view binding, `RecyclerView`, `BottomSheetBehavior`, theme attributes, and the existing resource files. Do **not** embed the HTML in a WebView.
+The task is to **recreate these designs in the existing Android codebase** (`RU-by-Strider/`, package `com.strider.ru`, Kotlin + Android Views/XML + Material Components) using its established patterns — Fragments, view binding, `RecyclerView`, `BottomSheetBehavior`, theme attributes, and the existing resource files. Do **not** embed the HTML in a WebView.
 
 > **Good news:** the codebase is already aligned with this design. `res/values/colors.xml` already defines the exact brand + category colors used here, and `res/values/strings.xml` already contains **every string** this design needs (settings rows, onboarding, index status, nav labels). This is a styling + layout + light-wiring job, not a from-scratch rebuild. Reuse those resources — do not hardcode hex or copy.
 

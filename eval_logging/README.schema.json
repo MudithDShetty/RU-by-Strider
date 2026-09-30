@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "description": "RU eval analytics — NDJSON events written to on-device filesDir/ru_eval/events/*.jsonl",
-  "export": "adb pull /data/data/com.strider.quanto/files/ru_eval ./analytics_data",
+  "export": "adb pull /data/data/com.strider.ru/files/ru_eval ./analytics_data",
   "events": {
     "search_completed": {
       "file": "events/search_YYYY-MM-DD.jsonl",

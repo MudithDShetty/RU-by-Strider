@@ -9,8 +9,14 @@ build/
 *.hprof
 
 local.properties
+keystore.properties
+*.jks
+*.keystore
 
 captures/
 .externalNativeBuild/
 .cxx/
 .kotlin/
+
+# Large model binaries (deliver via Play Asset Delivery / local assets, not git)
+*.onnx

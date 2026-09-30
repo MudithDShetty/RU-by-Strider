@@ -13,6 +13,17 @@
         android:layout_height="match_parent"
         android:paddingBottom="@dimen/ru_nav_clearance"/>
 
+    <!-- Index status detail — opened from Settings -->
+    <FrameLayout
+        android:id="@+id/indexDetailOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/ru_bg"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true"
+        android:elevation="6dp"/>
+
     <!-- Bottom nav bar — floating pill -->
     <FrameLayout
         android:id="@+id/llNavBar"
@@ -62,66 +73,6 @@
             </LinearLayout>
 
             <LinearLayout
-                android:id="@+id/navIndex"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:gravity="center"
-                android:clickable="true"
-                android:focusable="true"
-                android:minHeight="48dp"
-                android:contentDescription="@string/nav_index"
-                android:background="@drawable/bg_nav_tab_ripple_middle">
-                <ImageView
-                    android:id="@+id/navIndexIcon"
-                    android:layout_width="@dimen/ru_nav_icon_size"
-                    android:layout_height="@dimen/ru_nav_icon_size"
-                    android:scaleType="centerInside"
-                    android:src="@drawable/ic_index"
-                    android:importantForAccessibility="no"
-                    app:tint="@color/nav_tab_icon"/>
-                <TextView
-                    android:id="@+id/navIndexLabel"
-                    style="@style/RuText.TabLabel"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
-                    android:text="@string/nav_index"
-                    android:importantForAccessibility="no"/>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/navAnalytics"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:gravity="center"
-                android:clickable="true"
-                android:focusable="true"
-                android:minHeight="48dp"
-                android:visibility="gone"
-                android:contentDescription="@string/nav_analytics"
-                android:background="@drawable/bg_nav_tab_ripple_middle">
-                <ImageView
-                    android:id="@+id/navAnalyticsIcon"
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:src="@drawable/ic_analytics"
-                    android:importantForAccessibility="no"
-                    app:tint="@color/nav_tab_icon"/>
-                <TextView
-                    android:id="@+id/navAnalyticsLabel"
-                    style="@style/RuText.TabLabel"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
-                    android:text="@string/nav_analytics"
-                    android:importantForAccessibility="no"/>
-            </LinearLayout>
-
-            <LinearLayout
                 android:id="@+id/navSettings"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
@@ -162,12 +113,16 @@
         android:clickable="true"
         android:focusable="true"
         android:visibility="gone"
-        android:elevation="14dp">
+        android:elevation="14dp"
+        android:clipChildren="false">
 
         <ScrollView
+            android:id="@+id/onboardingScroll"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:fillViewport="true"
+            android:clipToPadding="false"
+            android:clipChildren="false"
             android:overScrollMode="never">
 
             <LinearLayout
@@ -176,11 +131,13 @@
                 android:orientation="vertical">
 
                 <Space
+                    android:id="@+id/onboardingTopSpacer"
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"/>
 
                 <LinearLayout
+                    android:id="@+id/onboardingMainContent"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
@@ -382,11 +339,23 @@
                     android:visibility="gone"/>
 
                 <TextView
+                    android:id="@+id/tvOnboardingPrivacyConsent"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:gravity="center"
+                    android:text="@string/onboarding_privacy_consent"
+                    android:textSize="12.5sp"
+                    android:textColor="@color/text_secondary"
+                    android:lineSpacingMultiplier="1.45"
+                    android:fontFamily="@font/hanken_grotesk_regular"/>
+
+                <TextView
                     android:id="@+id/btnOnboardingGrantStart"
                     style="@style/RuText.Button"
                     android:layout_width="match_parent"
                     android:layout_height="52dp"
-                    android:layout_marginTop="24dp"
+                    android:layout_marginTop="12dp"
                     android:gravity="center"
                     android:text="@string/onboarding_index_grant_start"
                     android:background="@drawable/bg_btn_primary"
@@ -518,11 +487,17 @@
                     android:id="@+id/tvModelLoadingPercent"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
                     android:layout_marginTop="@dimen/model_loading_track_percent_gap"
+                    android:paddingStart="32dp"
+                    android:paddingEnd="32dp"
+                    android:maxWidth="300dp"
+                    android:gravity="center"
                     android:text="0%"
                     android:textSize="13sp"
                     android:textColor="@color/text_secondary"
                     android:fontFamily="@font/hanken_grotesk_semibold"
+                    android:lineSpacingMultiplier="1.35"
                     android:fontFeatureSettings="tnum"
                     android:letterSpacing="0"/>
 
@@ -599,7 +574,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:textColor="@android:color/white"
+            android:textColor="@color/toast_text"
             android:textSize="14sp"
             android:fontFamily="sans-serif-medium"/>
     </LinearLayout>

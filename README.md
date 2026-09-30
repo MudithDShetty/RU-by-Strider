@@ -1,8 +1,8 @@
-# RU (Strider Quanto)
+# Ru (Strider Quanto)
 
 **On-device, multilingual semantic search for files on Android.**
 
-RU finds documents, photos, and media on your phone using natural language — in Hindi, English, Hinglish, and many other languages — without sending your files or queries to the cloud. All indexing, embedding, OCR, and ranking runs locally via ONNX Runtime, ML Kit, and SQLite.
+Ru finds documents, photos, and media on your phone using natural language — in Hindi, English, Hinglish, and many other languages — without sending your files or queries to the cloud. All indexing, embedding, OCR, and ranking runs locally via ONNX Runtime, ML Kit, and SQLite.
 
 | | |
 |---|---|
@@ -49,7 +49,7 @@ RU finds documents, photos, and media on your phone using natural language — i
 
 ## Overview
 
-Most file managers search by filename. RU goes further:
+Most file managers search by filename. Ru goes further:
 
 - **Semantic search** — query *"budget spreadsheet from last quarter"* and find `Q3_finance.xlsx` even when the filename says nothing about budgets.
 - **Lexical search** — fast keyword matching on filenames, folder paths, extracted content snippets, entities, and metadata.
@@ -70,7 +70,7 @@ The app is designed for mid-range ARM devices (e.g. Snapdragon 439 class) with c
 
 ## What's New
 
-This section summarizes major changes since the initial RU prototype. See [`Tasks.md`](Tasks.md) for the full engineering handoff and QA test matrix.
+This section summarizes major changes since the initial Ru prototype. See [`Tasks.md`](Tasks.md) for the full engineering handoff and QA test matrix.
 
 ### Search & Retrieval
 
@@ -391,7 +391,7 @@ sequenceDiagram
 
 ## Search Pipeline
 
-RU implements a **tiered hybrid retrieval pipeline** aligned with BEIR/RAG production patterns: retrieve broadly from multiple exact and semantic signals, fuse rankings, rerank top candidates, and fall back to an expanded pass when recall is weak.
+Ru implements a **tiered hybrid retrieval pipeline** aligned with BEIR/RAG production patterns: retrieve broadly from multiple exact and semantic signals, fuse rankings, rerank top candidates, and fall back to an expanded pass when recall is weak.
 
 ```mermaid
 flowchart TD
@@ -531,7 +531,7 @@ Search triggers logged to eval: `live_refine`, `ime_search`, `voice`, `category_
 
 ## Large-Library Retrieval
 
-At ~24,000 files, fixed retrieval caps drop 99.7% of the index before reranking. RU addresses this with:
+At ~24,000 files, fixed retrieval caps drop 99.7% of the index before reranking. Ru addresses this with:
 
 ### RetrievalScaling
 
@@ -637,7 +637,7 @@ Capped at ~400 characters / 96 tokens for embedding. Entity names are indexed fo
 
 ## OCR Pipeline
 
-Scanned PDFs often have no extractable text layer. RU detects weak text during indexing and queues files for background OCR.
+Scanned PDFs often have no extractable text layer. Ru detects weak text during indexing and queues files for background OCR.
 
 ### Detection (`PdfTextQuality`)
 
@@ -839,7 +839,7 @@ Schema reference: [`eval_logging/README.schema.json`](eval_logging/README.schema
 ### Exporting Analytics Data
 
 ```bash
-adb pull /data/data/com.strider.quanto/files/ru_eval ./analytics_data
+adb pull /data/data/com.strider.ru/files/ru_eval ./analytics_data
 ```
 
 ### In-App Analytics Screen
@@ -905,7 +905,7 @@ StriderQuanto/
 │       │   ├── assets/
 │       │   │   ├── tokenizer.json
 │       │   │   └── tokenizer_config.json
-│       │   ├── kotlin/com/strider/quanto/
+│       │   ├── kotlin/com/strider/ru/
 │       │   │   ├── ModelAssetDelivery.kt    # PAD fetch + copy to filesDir
 │       │   │   ├── StriderApp.kt            # Application lifecycle, workers, cache warm
 │       │   │   ├── MainActivity.kt          # Four-screen shell, unified search
@@ -955,7 +955,7 @@ StriderQuanto/
 │       │   │       ├── EvalLiveFeed.kt        # Analytics dashboard state
 │       │   │       └── AnalyticsEventAdapter.kt
 │       │   └── res/                         # Layouts, drawables, fonts, strings
-│       └── test/kotlin/com/strider/quanto/
+│       └── test/kotlin/com/strider/ru/
 │           ├── QueryEnricherTest.kt
 │           ├── QueryScoringTest.kt
 │           ├── MultilingualBridgeTest.kt
@@ -1205,7 +1205,7 @@ adb logcat -s FileIndexer EmbeddingEngine SearchPipeline DiskSearch SearchDebug 
 To export eval analytics:
 
 ```bash
-adb pull /data/data/com.strider.quanto/files/ru_eval ./analytics_data
+adb pull /data/data/com.strider.ru/files/ru_eval ./analytics_data
 ```
 
 ---
@@ -1300,12 +1300,12 @@ Extensions indexed (in priority order within each tier):
 |-------|--------------|-----|
 | "Setup failed — restart app" | Model download failed or corrupt | Tap **Retry download** on setup card; check Wi‑Fi. Debug: re-copy model to `app/src/debug/assets/` |
 | PAD download stuck on mobile data | Play requires consent for 200 MB+ | Tap **Retry download** — accepts Play's mobile-data dialog |
-| Index stays at 0 | Storage permission not granted | Settings → Apps → RU → Permissions → Allow all files access |
+| Index stays at 0 | Storage permission not granted | Settings → Apps → Ru → Permissions → Allow all files access |
 | Search returns nothing | Index empty or query too vague | Run Index; try simpler keywords first |
 | Slow first search after install | Embedding cache cold | Normal; second search uses warm RAM cache |
 | Person name not found | File indexed before v4 entity extraction | Re-index (Settings → Re-index) to populate `entities` column |
 | Scanned PDF not searchable | OCR not yet complete | Wait for OCR notification; ensure "Read file content" enabled |
-| Indexing stops when app closed | WorkManager killed by OEM battery saver | Disable battery optimization for RU |
+| Indexing stops when app closed | WorkManager killed by OEM battery saver | Disable battery optimization for Ru |
 | Voice search fails | No Google STT / no network | Use text search or check microphone permission |
 | Semantic toggle off | Settings | Enable "Semantic search" for meaning-based matching |
 | Analytics tab missing | Release build | Analytics only in debug builds (`EVAL_LOGGING=true`) |
@@ -1415,6 +1415,6 @@ See repository license file. Model weights (`granite-embedding-97m-multilingual`
 ---
 
 <p align="center">
-  <strong>RU · Strider Quanto</strong><br/>
+  <strong>Ru · Strider Quanto</strong><br/>
   Find anything in your language — entirely on your phone.
 </p>

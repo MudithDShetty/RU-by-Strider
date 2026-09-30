@@ -26,6 +26,18 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="22dp"
             android:layout_marginBottom="10dp"
+            android:text="@string/settings_section_setup"/>
+
+        <include
+            android:id="@+id/cardIndexStatus"
+            layout="@layout/layout_settings_index_status_card"/>
+
+        <TextView
+            style="@style/RuText.SectionHeader"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:layout_marginBottom="10dp"
             android:text="@string/settings_section_search"/>
 
         <LinearLayout
@@ -112,6 +124,13 @@
                 android:background="@color/divider"/>
             <include
                 android:id="@+id/rowVersion"
+                layout="@layout/item_settings_row"/>
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"/>
+            <include
+                android:id="@+id/rowPrivacyPolicy"
                 layout="@layout/item_settings_row"/>
             <View
                 android:layout_width="match_parent"

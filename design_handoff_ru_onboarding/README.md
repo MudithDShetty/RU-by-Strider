@@ -1,6 +1,6 @@
-# Handoff: RU — Onboarding screens (Splash · Loading)
+# Handoff: Ru — Onboarding screens (Splash · Loading)
 
-Two launch screens for the **RU (Strider Quanto)** Android app — package `com.strider.quanto`. Same warm palette and type system as the main app shell (see `../design_handoff_ru_app_shell/`); this bundle covers only the **splash** and the **model-loading** screen.
+Two launch screens for the **Ru (Strider Quanto)** Android app — package `com.strider.ru`. Same warm palette and type system as the main app shell (see `../design_handoff_ru_app_shell/`); this bundle covers only the **splash** and the **model-loading** screen.
 
 Rebuild natively (Activity / Fragment + Views/XML). **Do not embed the HTML in a WebView** — it's the visual source of truth only.
 

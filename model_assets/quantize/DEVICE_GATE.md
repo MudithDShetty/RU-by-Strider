@@ -5,7 +5,7 @@ Run after installing a debug build with bundled `model_int8.onnx`.
 ## 1. Clear stale state (first run or after model bump)
 
 ```bash
-adb shell pm clear com.strider.quanto
+adb shell pm clear com.strider.ru
 ```
 
 ## 2. Install and open app
@@ -27,7 +27,7 @@ adb logcat -s EmbeddingEngine EmbeddingBackend ModelAssetDelivery IndexingWorker
 ## 4. Eval export
 
 ```bash
-adb pull /data/data/com.strider.quanto/files/ru_eval ./analytics_data
+adb pull /data/data/com.strider.ru/files/ru_eval ./analytics_data
 ```
 
 Check `index_completed` for `"embedding_backend": "int8_cpu"` and `search_completed` for `"embedding_cache_warm": true` after index.

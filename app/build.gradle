@@ -37,27 +37,44 @@ def fp32ModelFile = fp32ModelCandidates.find { it.exists() && it.length() > 200L
 def fp32ModelBytes = fp32ModelFile != null ? fp32ModelFile.length() : 0L
 def fp32ModelSha256 = fp32ModelFile != null ? sha256Hex(fp32ModelFile) : ""
 
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
-    namespace 'com.strider.quanto'
-    compileSdk 34
+    namespace 'com.strider.ru'
+    compileSdk 36
 
     assetPacks = [":embeddingmodel", ":embeddingmodel_fp32"]
 
     defaultConfig {
-        applicationId "com.strider.quanto"
+        applicationId "com.strider.ru"
         minSdk 26
-        targetSdk 34
-        versionCode 1
-        versionName "1.0"
-        buildConfigField "boolean", "EVAL_LOGGING", "true"
+        targetSdk 36
+        versionCode 3
+        versionName "1.0.2"
         buildConfigField "boolean", "PROBE_NNAPI", "true"
         buildConfigField "long", "MODEL_BYTES", "${embeddingModelBytes}L"
         buildConfigField "long", "MODEL_FP32_BYTES", "${fp32ModelBytes}L"
         buildConfigField "String", "MODEL_SHA256", "\"${embeddingModelSha256}\""
         buildConfigField "String", "MODEL_FP32_SHA256", "\"${fp32ModelSha256}\""
         buildConfigField "int", "MODEL_VERSION", "3"
+        buildConfigField "String", "PRIVACY_POLICY_URL", "\"https://striderhq.co/privacy\""
         ndk {
             abiFilters "arm64-v8a"
+        }
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                storeFile rootProject.file(keystoreProperties["storeFile"])
+                storePassword keystoreProperties["storePassword"]
+                keyAlias keystoreProperties["keyAlias"]
+                keyPassword keystoreProperties["keyPassword"]
+            }
         }
     }
 
@@ -66,8 +83,10 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            buildConfigField "boolean", "EVAL_LOGGING", "false"
             buildConfigField "boolean", "PROBE_NNAPI", "false"
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
@@ -113,8 +132,8 @@ dependencies {
     implementation 'com.google.android.play:asset-delivery:2.2.2'
     implementation 'com.google.android.play:asset-delivery-ktx:2.2.2'
 
-    // ONNX Runtime — runs the embedding model locally
-    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.17.3'
+    // ONNX Runtime — runs the embedding model locally (1.22+ required for 16 KB page size / API 35 Play)
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.23.2'
 
     // Coroutines — keeps inference off the main thread
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
@@ -129,6 +148,7 @@ dependencies {
 
     // Standard Android UI
     implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.browser:browser:1.8.0'
     implementation 'androidx.core:core-splashscreen:1.0.1'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
